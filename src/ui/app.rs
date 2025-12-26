@@ -1,6 +1,6 @@
 use crate::acquisition::{start_tcp_server, DataMessage};
-use crate::core::paths::get_model_path;
 use crate::core::DataStore;
+use crate::ui::launch_loader;
 use crate::ui::layout::LayoutData;
 use crate::ui::menu::{render_menu_bar, MenuAction, MenuState};
 use crate::ui::panels::tabs::gltf_loader::ModelCache;
@@ -15,7 +15,6 @@ use eframe::egui;
 use egui_phosphor::regular as icons;
 use egui_tiles::{Container, Linear, LinearDir, Tile, TileId, Tiles, Tree};
 use std::path::PathBuf;
-use std::process::Command;
 
 pub struct TiPlotApp {
     data_store: DataStore,
@@ -100,18 +99,18 @@ impl TiPlotApp {
 
         let mut model_cache = ModelCache::new();
 
-        let models = [
-            ("FixedWing.glb", "Fixed Wing"),
-            ("QuadCopter.glb", "Quadcopter"),
-            ("DeltaWing.glb", "Delta Wing"),
-        ];
+        const FIXED_WING_GLB: &[u8] = include_bytes!("../../assets/models/FixedWing.glb");
+        const QUAD_COPTER_GLB: &[u8] = include_bytes!("../../assets/models/QuadCopter.glb");
+        const DELTA_WING_GLB: &[u8] = include_bytes!("../../assets/models/DeltaWing.glb");
 
-        for (filename, display_name) in &models {
-            let path = get_model_path(filename);
-            match model_cache.load_model(&path.to_string_lossy()) {
-                Ok(_) => {}
-                Err(e) => eprintln!("✗ Failed to load {} model: {}", display_name, e),
-            }
+        if let Err(e) = model_cache.load_from_bytes("FixedWing", FIXED_WING_GLB) {
+            eprintln!("✗ Failed to load Fixed Wing model: {}", e);
+        }
+        if let Err(e) = model_cache.load_from_bytes("QuadCopter", QUAD_COPTER_GLB) {
+            eprintln!("✗ Failed to load Quadcopter model: {}", e);
+        }
+        if let Err(e) = model_cache.load_from_bytes("DeltaWing", DELTA_WING_GLB) {
+            eprintln!("✗ Failed to load Delta Wing model: {}", e);
         }
 
         setup_fonts(&cc.egui_ctx);

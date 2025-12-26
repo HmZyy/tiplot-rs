@@ -1,4 +1,4 @@
-use crate::core::{paths::get_model_path, DataStore};
+use crate::core::DataStore;
 use eframe::egui;
 use egui_phosphor::regular as icons;
 use serde::{Deserialize, Serialize};
@@ -46,13 +46,11 @@ impl VehicleType {
     }
 
     pub fn model_path(&self) -> String {
-        let filename = match self {
-            VehicleType::FixedWing => "FixedWing.glb",
-            VehicleType::QuadCopter => "QuadCopter.glb",
-            VehicleType::DeltaWing => "DeltaWing.glb",
-        };
-
-        get_model_path(filename).to_string_lossy().to_string()
+        match self {
+            VehicleType::FixedWing => "FixedWing".to_string(),
+            VehicleType::QuadCopter => "QuadCopter".to_string(),
+            VehicleType::DeltaWing => "DeltaWing".to_string(),
+        }
     }
 
     pub fn orientation_offset(&self) -> glam::Vec3 {

@@ -18,24 +18,26 @@ impl ModelCache {
         }
     }
 
-    pub fn load_model(&mut self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
-        if self.models.contains_key(path) {
+    pub fn load_from_bytes(
+        &mut self,
+        name: &str,
+        data: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.models.contains_key(name) {
             return Ok(());
         }
 
-        let model_path = std::path::PathBuf::from(path);
+        let (document, buffers, _) = gltf::import_slice(data)?;
+        let model = Self::process_gltf(document, buffers)?;
+        self.models.insert(name.to_string(), model);
 
-        if !model_path.exists() {
-            return Err(format!(
-                "Model file not found: {} (resolved to: {})",
-                path,
-                model_path.display()
-            )
-            .into());
-        }
+        Ok(())
+    }
 
-        let (document, buffers, _) = gltf::import(path)?;
-
+    fn process_gltf(
+        document: gltf::Document,
+        buffers: Vec<gltf::buffer::Data>,
+    ) -> Result<Model, Box<dyn std::error::Error>> {
         let mut all_vertices = Vec::new();
         let mut unique_edges: HashSet<(u32, u32)> = HashSet::new();
 
@@ -130,15 +132,10 @@ impl ModelCache {
 
         let lines: Vec<[u32; 2]> = unique_edges.into_iter().map(|(a, b)| [a, b]).collect();
 
-        self.models.insert(
-            path.to_string(),
-            Model {
-                vertices: all_vertices,
-                lines,
-            },
-        );
-
-        Ok(())
+        Ok(Model {
+            vertices: all_vertices,
+            lines,
+        })
     }
 
     pub fn get_model(&self, path: &str) -> Option<&Model> {
