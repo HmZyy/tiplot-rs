@@ -37,7 +37,6 @@ pub fn start_tcp_server(sender: Sender<DataMessage>, ctx: egui::Context) {
             .expect("Failed to bind TCP port 9999");
 
         println!("TCP Receiver listening on 127.0.0.1:9999");
-        println!("Waiting for data from Python sender...");
 
         loop {
             match listener.accept().await {

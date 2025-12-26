@@ -1,76 +1,20 @@
 use crate::acquisition::{start_tcp_server, DataMessage};
-use crate::core::DataStore;
+use crate::ui::app_state::AppState;
 use crate::ui::launch_loader;
-use crate::ui::layout::LayoutData;
-use crate::ui::menu::{render_menu_bar, MenuAction, MenuState};
+use crate::ui::menu::{render_menu_bar, MenuAction};
 use crate::ui::panels::tabs::gltf_loader::ModelCache;
 use crate::ui::panels::{
     render_config_window, render_timeline, render_topic_panel, render_view3d_panel,
-    TopicPanelSelection, View3DPanel,
 };
 use crate::ui::renderer::PlotRenderer;
-use crate::ui::tiles::{InterpolationMode, PlotTile, TiPlotBehavior};
-use crossbeam_channel::{unbounded, Receiver};
+use crate::ui::tiles::TiPlotBehavior;
+use crossbeam_channel::unbounded;
 use eframe::egui;
 use egui_phosphor::regular as icons;
-use egui_tiles::{Container, Linear, LinearDir, Tile, TileId, Tiles, Tree};
 use std::path::PathBuf;
 
 pub struct TiPlotApp {
-    data_store: DataStore,
-    rx: Receiver<DataMessage>,
-
-    /// Tile tree
-    tree: Tree<PlotTile>,
-    dragged_item: Option<(String, String)>,
-
-    /// Topic panel selection state
-    topic_selection: TopicPanelSelection,
-
-    /// 3D view panel state
-    view3d_panel: View3DPanel,
-    model_cache: ModelCache,
-
-    // Global view state
-    min_time: f32,
-    max_time: f32,
-    global_min: f32,
-    global_max: f32,
-
-    // Current timeline cursor position
-    current_time: f32,
-
-    // Playback controls
-    is_playing: bool,
-    playback_speed: f32,
-    last_update_time: Option<std::time::Instant>,
-
-    // Timeline locks
-    lock_to_last: bool,
-    lock_viewport: bool,
-    always_show_playback_tooltip: bool,
-    last_viewport_width: f32,
-
-    split_request: Option<(TileId, LinearDir)>,
-    reset_sizes_request: bool,
-
-    topic_panel_collapsed: bool,
-    view3d_panel_collapsed: bool,
-
-    // Layout management
-    menu_state: MenuState,
-    layouts_dir: PathBuf,
-
-    receiving_data: bool,
-    last_data_time: Option<std::time::Instant>,
-
-    data_file_path: Option<PathBuf>,
-
-    // Fps tracking
-    frame_times: std::collections::VecDeque<std::time::Instant>,
-    current_fps: f32,
-
-    global_interpolation_mode: InterpolationMode,
+    state: AppState,
 }
 
 pub fn setup_fonts(ctx: &egui::Context) {
@@ -92,10 +36,6 @@ impl TiPlotApp {
 
         let (tx, rx) = unbounded();
         start_tcp_server(tx, cc.egui_ctx.clone());
-
-        let mut tiles = Tiles::default();
-        let root = tiles.insert_pane(PlotTile::new());
-        let tree = Tree::new("main_tree", root, tiles);
 
         let mut model_cache = ModelCache::new();
 
@@ -126,71 +66,48 @@ impl TiPlotApp {
         };
 
         Self {
-            data_store: DataStore::new(),
-            rx,
-            tree,
-            topic_selection: TopicPanelSelection::default(),
-            view3d_panel: View3DPanel::new(),
-            model_cache,
-            dragged_item: None,
-            min_time: 0.0,
-            max_time: 10.0,
-            global_min: 0.0,
-            global_max: 10.0,
-            current_time: 0.0,
-            is_playing: false,
-            playback_speed: 10.0,
-            last_update_time: None,
-            lock_to_last: true,
-            lock_viewport: false,
-            always_show_playback_tooltip: false,
-            last_viewport_width: 10.0,
-            split_request: None,
-            reset_sizes_request: false,
-            topic_panel_collapsed: false,
-            view3d_panel_collapsed: true,
-            menu_state: MenuState::default(),
-            layouts_dir,
-            receiving_data: false,
-            last_data_time: None,
-            data_file_path: None,
-            frame_times: std::collections::VecDeque::with_capacity(60),
-            current_fps: 0.0,
-            global_interpolation_mode: InterpolationMode::default(),
+            state: AppState::new(rx, layouts_dir, model_cache),
         }
     }
 
-    fn save_layout(&mut self, name: String) {
-        let layout = LayoutData::from_tree(name, &self.tree, &self.view3d_panel.vehicles);
-
-        match layout.save_to_file(&self.layouts_dir) {
-            Ok(_) => {
-                println!("✓ Layout '{}' saved successfully", layout.name);
-            }
-            Err(e) => {
-                eprintln!("✗ Failed to save layout: {}", e);
-                self.menu_state.error_message = Some(format!("Failed to save: {}", e));
-            }
-        }
+    fn handle_menu_actions(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let action = self.state.ui.menu_state.show_save_dialog(ctx);
+        self.process_menu_action(action, frame);
     }
 
-    fn load_layout(&mut self, path: PathBuf) {
-        match LayoutData::load_from_file(&path) {
-            Ok(layout) => match layout.to_tree() {
-                Ok(tree) => {
-                    self.tree = tree;
-                    self.view3d_panel.vehicles = layout.vehicles;
-                    println!("✓ Layout '{}' loaded successfully", layout.name);
+    fn process_menu_action(&mut self, action: MenuAction, frame: &mut eframe::Frame) {
+        match action {
+            MenuAction::SaveLayout(name) => {
+                if let Err(e) = self.state.layout.save_layout(
+                    name,
+                    &self.state.ui.layouts_dir,
+                    &self.state.panels.view3d_panel.vehicles,
+                ) {
+                    self.state.ui.menu_state.error_message = Some(e);
                 }
-                Err(e) => {
-                    eprintln!("✗ Failed to reconstruct tree: {}", e);
-                    self.menu_state.error_message = Some(format!("Failed to load layout: {}", e));
-                }
-            },
-            Err(e) => {
-                eprintln!("✗ Failed to load layout: {}", e);
-                self.menu_state.error_message = Some(format!("Failed to load: {}", e));
             }
+            MenuAction::LoadLayout(path) => {
+                if let Err(e) = self
+                    .state
+                    .layout
+                    .load_layout(path, &mut self.state.panels.view3d_panel.vehicles)
+                {
+                    self.state.ui.menu_state.error_message = Some(e);
+                }
+            }
+            MenuAction::SaveData => self.save_data(),
+            MenuAction::LoadData => self.load_data(frame),
+            MenuAction::ClearData => self.state.clear_all(),
+            MenuAction::LaunchLoader => {
+                if let Err(e) = launch_loader() {
+                    self.state.ui.menu_state.error_message = Some(e);
+                }
+            }
+            MenuAction::SetInterpolationMode(mode) => {
+                self.state.layout.global_interpolation_mode = mode;
+                self.apply_interpolation_mode_to_all_tiles(mode);
+            }
+            MenuAction::None => {}
         }
     }
 
@@ -200,14 +117,14 @@ impl TiPlotApp {
             .add_filter("Arrow Files", &["arrow"])
             .save_file()
         {
-            match self.data_store.save_to_arrow(&path) {
+            match self.state.data.data_store.save_to_arrow(&path) {
                 Ok(_) => {
-                    self.data_file_path = Some(path.clone());
+                    self.state.data.data_file_path = Some(path.clone());
                     println!("✓ Data saved to: {}", path.display());
                 }
                 Err(e) => {
                     eprintln!("✗ Failed to save data: {}", e);
-                    self.menu_state.error_message = Some(format!("Failed to save: {}", e));
+                    self.state.ui.menu_state.error_message = Some(format!("Failed to save: {}", e));
                 }
             }
         }
@@ -218,11 +135,11 @@ impl TiPlotApp {
             .add_filter("Arrow Files", &["arrow"])
             .pick_file()
         {
-            let mut data_store = DataStore::new();
+            let mut data_store = crate::core::DataStore::new();
             match data_store.load_from_arrow(&path) {
                 Ok(_) => {
-                    self.data_store = data_store;
-                    self.data_file_path = Some(path.clone());
+                    self.state.data.data_store = data_store;
+                    self.state.data.data_file_path = Some(path.clone());
                     println!("✓ Data loaded from: {}", path.display());
 
                     self.reupload_all_traces(frame);
@@ -230,65 +147,10 @@ impl TiPlotApp {
                 }
                 Err(e) => {
                     eprintln!("✗ Failed to load data: {}", e);
-                    self.menu_state.error_message = Some(format!("Failed to load: {}", e));
+                    self.state.ui.menu_state.error_message = Some(format!("Failed to load: {}", e));
                 }
             }
         }
-    }
-
-    fn clear_data(&mut self) {
-        self.data_store = DataStore::new();
-
-        fn clear_tiles_recursive(
-            tiles: &mut egui_tiles::Tiles<PlotTile>,
-            tile_id: egui_tiles::TileId,
-        ) {
-            if let Some(tile) = tiles.get_mut(tile_id) {
-                match tile {
-                    egui_tiles::Tile::Pane(plot_tile) => {
-                        plot_tile.traces.clear();
-                        plot_tile.cached_tooltip_values.clear();
-                        plot_tile.cached_tooltip_time = f32::NEG_INFINITY;
-                    }
-                    egui_tiles::Tile::Container(container) => {
-                        let children = match container {
-                            egui_tiles::Container::Linear(linear) => linear.children.clone(),
-                            egui_tiles::Container::Tabs(tabs) => tabs.children.clone(),
-                            egui_tiles::Container::Grid(grid) => grid.children().copied().collect(),
-                        };
-                        for child_id in children {
-                            clear_tiles_recursive(tiles, child_id);
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(root_id) = self.tree.root {
-            clear_tiles_recursive(&mut self.tree.tiles, root_id);
-        }
-
-        // Reset timeline state
-        self.min_time = 0.0;
-        self.max_time = 10.0;
-        self.global_min = 0.0;
-        self.global_max = 10.0;
-        self.current_time = 0.0;
-        self.last_viewport_width = 10.0;
-
-        // Reset playback
-        self.is_playing = false;
-        self.last_update_time = None;
-
-        // Clear data file path
-        self.data_file_path = None;
-
-        // Reset data receiving state
-        self.receiving_data = false;
-        self.last_data_time = None;
-
-        // TODO: Clear 3D view vehicles data (reset to defaults)
-        for _vehicle in &mut self.view3d_panel.vehicles {}
     }
 
     fn reupload_all_traces(&mut self, frame: &mut eframe::Frame) {
@@ -301,7 +163,7 @@ impl TiPlotApp {
             .get_mut::<PlotRenderer>()
             .unwrap();
 
-        for (topic, cols) in &self.data_store.topics {
+        for (topic, cols) in &self.state.data.data_store.topics {
             if let Some(timestamps) = cols.get("timestamp") {
                 for (col_name, values) in cols {
                     if col_name == "timestamp" {
@@ -317,7 +179,7 @@ impl TiPlotApp {
         let mut min_time = f32::MAX;
         let mut max_time = f32::MIN;
 
-        for (_topic, cols) in &self.data_store.topics {
+        for (_topic, cols) in &self.state.data.data_store.topics {
             if let Some(timestamps) = cols.get("timestamp") {
                 if !timestamps.is_empty() {
                     min_time = min_time.min(timestamps[0]);
@@ -327,150 +189,70 @@ impl TiPlotApp {
         }
 
         if min_time != f32::MAX && max_time != f32::MIN {
-            self.global_min = 0.0;
-            self.global_max = max_time;
-            self.min_time = 0.0;
-            self.max_time = max_time;
-            self.current_time = min_time;
-            self.last_viewport_width = max_time;
+            self.state.timeline.update_bounds(min_time, max_time);
         }
     }
 
-    fn handle_split_request(&mut self) {
-        if let Some((tile_id, direction)) = self.split_request.take() {
-            let mut new_tile = PlotTile::new();
-            new_tile.interpolation_mode = self.global_interpolation_mode;
-            let new_tile_id = self.tree.tiles.insert_pane(new_tile);
-            let parent_id = self.tree.tiles.parent_of(tile_id);
-
-            if let Some(parent_id) = parent_id {
-                let action = if let Some(Tile::Container(parent_container)) =
-                    self.tree.tiles.get(parent_id)
-                {
-                    match parent_container {
-                        Container::Linear(linear) => {
-                            if linear.dir == direction {
-                                linear
-                                    .children
-                                    .iter()
-                                    .position(|&id| id == tile_id)
-                                    .map(|pos| (false, pos))
-                            } else {
-                                linear
-                                    .children
-                                    .iter()
-                                    .position(|&id| id == tile_id)
-                                    .map(|pos| (true, pos))
-                            }
-                        }
-                        Container::Tabs(tabs) => tabs
-                            .children
-                            .iter()
-                            .position(|&id| id == tile_id)
-                            .map(|pos| (true, pos)),
-                        Container::Grid(_) => Some((true, 0)),
+    fn apply_interpolation_mode_to_all_tiles(&mut self, mode: crate::ui::tiles::InterpolationMode) {
+        fn update_tiles_recursive(
+            tiles: &mut egui_tiles::Tiles<crate::ui::tiles::PlotTile>,
+            tile_id: egui_tiles::TileId,
+            mode: crate::ui::tiles::InterpolationMode,
+        ) {
+            if let Some(tile) = tiles.get_mut(tile_id) {
+                match tile {
+                    egui_tiles::Tile::Pane(plot_tile) => {
+                        plot_tile.interpolation_mode = mode;
+                        plot_tile.cached_tooltip_time = f32::NEG_INFINITY;
+                        plot_tile.cached_tooltip_values.clear();
                     }
-                } else {
-                    None
-                };
-
-                if let Some((needs_new_container, pos)) = action {
-                    if needs_new_container {
-                        let new_container = Container::Linear(Linear {
-                            children: vec![tile_id, new_tile_id],
-                            dir: direction,
-                            ..Default::default()
-                        });
-                        let container_id = self.tree.tiles.insert_container(new_container);
-
-                        if let Some(Tile::Container(parent_container)) =
-                            self.tree.tiles.get_mut(parent_id)
-                        {
-                            match parent_container {
-                                Container::Linear(linear) => {
-                                    linear.children[pos] = container_id;
-                                }
-                                Container::Tabs(tabs) => {
-                                    tabs.children[pos] = container_id;
-                                }
-                                Container::Grid(_) => {}
-                            }
-                        }
-                    } else {
-                        if let Some(Tile::Container(Container::Linear(linear))) =
-                            self.tree.tiles.get_mut(parent_id)
-                        {
-                            linear.children.insert(pos + 1, new_tile_id);
+                    egui_tiles::Tile::Container(container) => {
+                        let children = match container {
+                            egui_tiles::Container::Linear(linear) => linear.children.clone(),
+                            egui_tiles::Container::Tabs(tabs) => tabs.children.clone(),
+                            egui_tiles::Container::Grid(grid) => grid.children().copied().collect(),
+                        };
+                        for child_id in children {
+                            update_tiles_recursive(tiles, child_id, mode);
                         }
                     }
                 }
-            } else {
-                let new_container = Container::Linear(Linear {
-                    children: vec![tile_id, new_tile_id],
-                    dir: direction,
-                    ..Default::default()
-                });
-                let container_id = self.tree.tiles.insert_container(new_container);
-                self.tree.root = Some(container_id);
             }
+        }
+
+        if let Some(root_id) = self.state.layout.tree.root {
+            update_tiles_recursive(&mut self.state.layout.tree.tiles, root_id, mode);
         }
     }
 
-    fn handle_reset_sizes_request(&mut self) {
-        if self.reset_sizes_request {
-            self.reset_sizes_request = false;
-
-            fn reset_container_shares(tiles: &mut Tiles<PlotTile>, tile_id: TileId) {
-                let children_to_process = if let Some(Tile::Container(container)) =
-                    tiles.get(tile_id)
-                {
-                    match container {
-                        Container::Linear(linear) => Some(linear.children.clone()),
-                        Container::Tabs(tabs) => Some(tabs.children.clone()),
-                        Container::Grid(grid) => Some(grid.children().copied().collect::<Vec<_>>()),
-                    }
-                } else {
-                    None
-                };
-
-                if let Some(children) = children_to_process {
-                    if let Some(Tile::Container(container)) = tiles.get_mut(tile_id) {
-                        match container {
-                            Container::Linear(linear) => {
-                                for &child_id in &children {
-                                    linear.shares.set_share(child_id, 1.0);
-                                }
-                            }
-                            Container::Tabs(_) => {
-                                // Nothing to do for tabs
-                            }
-                            Container::Grid(grid) => {
-                                let num_children = children.len();
-                                if num_children > 0 {
-                                    let cols = (num_children as f32).sqrt().ceil() as usize;
-                                    grid.col_shares = vec![1.0; cols];
-                                    grid.row_shares = vec![1.0; (num_children + cols - 1) / cols];
-                                }
-                            }
-                        }
-                    }
-
-                    for &child_id in &children {
-                        reset_container_shares(tiles, child_id);
-                    }
-                }
+    fn handle_keyboard_input(&mut self, ctx: &egui::Context) {
+        ctx.input(|i| {
+            if i.key_pressed(egui::Key::Space) {
+                self.state.timeline.is_playing = !self.state.timeline.is_playing;
             }
 
-            if let Some(root_id) = self.tree.root {
-                reset_container_shares(&mut self.tree.tiles, root_id);
+            if i.key_pressed(egui::Key::ArrowLeft) {
+                let min_interval = self.estimate_min_sample_interval();
+                self.state.timeline.current_time = (self.state.timeline.current_time
+                    - min_interval)
+                    .max(self.state.timeline.min_time);
+                self.state.timeline.is_playing = false;
             }
-        }
+
+            if i.key_pressed(egui::Key::ArrowRight) {
+                let min_interval = self.estimate_min_sample_interval();
+                self.state.timeline.current_time = (self.state.timeline.current_time
+                    + min_interval)
+                    .min(self.state.timeline.max_time);
+                self.state.timeline.is_playing = false;
+            }
+        });
     }
 
     fn estimate_min_sample_interval(&self) -> f32 {
         let mut min_interval = f32::MAX;
 
-        for (_topic_name, cols) in &self.data_store.topics {
+        for (_topic_name, cols) in &self.state.data.data_store.topics {
             if let Some(timestamps) = cols.get("timestamp") {
                 if timestamps.len() >= 2 {
                     let samples_to_check = timestamps.len().min(100);
@@ -505,42 +287,46 @@ impl TiPlotApp {
         let mut batches_processed = 0;
         const MAX_BATCHES_PER_FRAME: usize = 5;
 
-        while let Ok(msg) = self.rx.try_recv() {
+        while let Ok(msg) = self.state.data.rx.try_recv() {
             match msg {
                 DataMessage::Metadata(meta) => {
                     if let (Some(min), Some(max)) = (meta.min_timestamp, meta.max_timestamp) {
                         let raw_min = min as f64 / 1_000_000.0;
                         let raw_max = max as f64 / 1_000_000.0;
 
-                        if self.data_store.start_time == 0.0 {
-                            self.data_store.start_time = raw_min as f32;
-                            self.global_min = 0.0;
-                            self.global_max = (raw_max - self.data_store.start_time as f64) as f32;
-                            self.min_time = self.global_min;
-                            self.max_time = self.global_max;
-                            self.last_viewport_width = self.global_max - self.global_min;
+                        if self.state.data.data_store.start_time == 0.0 {
+                            self.state.data.data_store.start_time = raw_min as f32;
+                            self.state.timeline.global_min = 0.0;
+                            self.state.timeline.global_max =
+                                (raw_max - self.state.data.data_store.start_time as f64) as f32;
+                            self.state.timeline.min_time = self.state.timeline.global_min;
+                            self.state.timeline.max_time = self.state.timeline.global_max;
+                            self.state.timeline.last_viewport_width =
+                                self.state.timeline.global_max - self.state.timeline.global_min;
                         } else {
-                            self.global_min = 0.0;
-                            self.global_max = (raw_max - self.data_store.start_time as f64) as f32;
+                            self.state.timeline.global_min = 0.0;
+                            self.state.timeline.global_max =
+                                (raw_max - self.state.data.data_store.start_time as f64) as f32;
 
-                            if self.lock_viewport {
-                                self.max_time = self.global_max;
-                                self.min_time = self.max_time - self.last_viewport_width;
+                            if self.state.timeline.lock_viewport {
+                                self.state.timeline.max_time = self.state.timeline.global_max;
+                                self.state.timeline.min_time = self.state.timeline.max_time
+                                    - self.state.timeline.last_viewport_width;
                             } else {
-                                self.max_time = self.global_max;
+                                self.state.timeline.max_time = self.state.timeline.global_max;
                             }
 
-                            if self.lock_to_last {
-                                self.current_time = self.max_time;
+                            if self.state.timeline.lock_to_last {
+                                self.state.timeline.current_time = self.state.timeline.max_time;
                             }
                         }
                     }
                     received_data = true;
                 }
                 DataMessage::NewBatch(topic, batch) => {
-                    self.data_store.ingest(topic.clone(), batch);
+                    self.state.data.data_store.ingest(topic.clone(), batch);
 
-                    if let Some(cols) = self.data_store.topics.get(&topic) {
+                    if let Some(cols) = self.state.data.data_store.topics.get(&topic) {
                         if let Some(timestamps) = cols.get("timestamp") {
                             for (col_name, values) in cols {
                                 if col_name == "timestamp" {
@@ -562,163 +348,40 @@ impl TiPlotApp {
         }
 
         if received_data {
-            self.receiving_data = true;
-            self.last_data_time = Some(std::time::Instant::now());
+            self.state.data.receiving_data = true;
+            self.state.data.last_data_time = Some(std::time::Instant::now());
             ctx.request_repaint();
         } else {
-            if let Some(last_time) = self.last_data_time {
+            if let Some(last_time) = self.state.data.last_data_time {
                 if last_time.elapsed().as_millis() > 500 {
-                    self.receiving_data = false;
+                    self.state.data.receiving_data = false;
                 }
             }
         }
 
-        if self.receiving_data {
+        if self.state.data.receiving_data {
             ctx.request_repaint();
         }
     }
 
-    fn update_fps(&mut self) {
-        let now = std::time::Instant::now();
-        self.frame_times.push_back(now);
-
-        while self.frame_times.len() > 60 {
-            self.frame_times.pop_front();
-        }
-
-        if self.frame_times.len() >= 2 {
-            let elapsed = now.duration_since(self.frame_times[0]).as_secs_f32();
-            if elapsed > 0.0 {
-                self.current_fps = (self.frame_times.len() - 1) as f32 / elapsed;
-            }
-        }
-    }
-
-    fn apply_interpolation_mode_to_all_tiles(&mut self, mode: InterpolationMode) {
-        fn update_tiles_recursive(
-            tiles: &mut egui_tiles::Tiles<PlotTile>,
-            tile_id: egui_tiles::TileId,
-            mode: InterpolationMode,
-        ) {
-            if let Some(tile) = tiles.get_mut(tile_id) {
-                match tile {
-                    egui_tiles::Tile::Pane(plot_tile) => {
-                        plot_tile.interpolation_mode = mode;
-                        plot_tile.cached_tooltip_time = f32::NEG_INFINITY;
-                        plot_tile.cached_tooltip_values.clear();
-                    }
-                    egui_tiles::Tile::Container(container) => {
-                        let children = match container {
-                            egui_tiles::Container::Linear(linear) => linear.children.clone(),
-                            egui_tiles::Container::Tabs(tabs) => tabs.children.clone(),
-                            egui_tiles::Container::Grid(grid) => grid.children().copied().collect(),
-                        };
-                        for child_id in children {
-                            update_tiles_recursive(tiles, child_id, mode);
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(root_id) = self.tree.root {
-            update_tiles_recursive(&mut self.tree.tiles, root_id, mode);
-        }
-    }
-}
-
-impl eframe::App for TiPlotApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        self.update_fps();
-        self.process_data(ctx, frame);
-
-        // TODO: expose this as global setting: continuous rendering
-        ctx.request_repaint();
-
-        ctx.input(|i| {
-            if i.key_pressed(egui::Key::Space) {
-                self.is_playing = !self.is_playing;
-            }
-
-            if i.key_pressed(egui::Key::ArrowLeft) {
-                let min_interval = self.estimate_min_sample_interval();
-                self.current_time = (self.current_time - min_interval).max(self.min_time);
-                self.is_playing = false;
-            }
-
-            if i.key_pressed(egui::Key::ArrowRight) {
-                let min_interval = self.estimate_min_sample_interval();
-                self.current_time = (self.current_time + min_interval).min(self.max_time);
-                self.is_playing = false;
-            }
-        });
-
-        if self.is_playing {
-            let now = std::time::Instant::now();
-            if let Some(last_time) = self.last_update_time {
-                let elapsed = now.duration_since(last_time).as_secs_f32();
-                let time_delta = elapsed * self.playback_speed;
-                self.current_time += time_delta;
-                if self.current_time > self.max_time {
-                    self.current_time = self.min_time;
-                }
-            }
-            self.last_update_time = Some(now);
-            ctx.request_repaint();
-        } else {
-            self.last_update_time = None;
-        }
-
-        match self.menu_state.show_save_dialog(ctx) {
-            MenuAction::SaveLayout(name) => {
-                self.save_layout(name);
-            }
-            _ => {}
-        }
-
+    fn render_top_menu_bar(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("menu_bar")
             .exact_height(28.0)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     let action = render_menu_bar(
                         ui,
-                        &mut self.menu_state,
-                        &self.layouts_dir,
-                        self.global_interpolation_mode,
+                        &mut self.state.ui.menu_state,
+                        &self.state.ui.layouts_dir,
+                        self.state.layout.global_interpolation_mode,
                     );
-                    match action {
-                        MenuAction::SaveLayout(name) => {
-                            self.save_layout(name);
-                        }
-                        MenuAction::LoadLayout(path) => {
-                            self.load_layout(path);
-                        }
-                        MenuAction::SaveData => {
-                            self.save_data();
-                        }
-                        MenuAction::LoadData => {
-                            self.load_data(frame);
-                        }
-                        MenuAction::ClearData => {
-                            self.clear_data();
-                        }
-                        MenuAction::LaunchLoader => {
-                            if let Err(e) = launch_loader() {
-                                self.menu_state.error_message = Some(e);
-                            }
-                        }
-                        MenuAction::SetInterpolationMode(mode) => {
-                            self.global_interpolation_mode = mode;
-                            self.apply_interpolation_mode_to_all_tiles(mode);
-                        }
-                        MenuAction::None => {}
-                    }
+                    self.process_menu_action(action, frame);
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(3.0);
 
                         let indicator_radius = 6.0;
-                        let indicator_color = if self.receiving_data {
+                        let indicator_color = if self.state.data.receiving_data {
                             egui::Color32::from_rgb(255, 50, 50)
                         } else {
                             egui::Color32::from_rgb(128, 128, 128)
@@ -735,7 +398,7 @@ impl eframe::App for TiPlotApp {
                             indicator_color,
                         );
 
-                        response.on_hover_text(if self.receiving_data {
+                        response.on_hover_text(if self.state.data.receiving_data {
                             "Receiving data..."
                         } else {
                             "Idle"
@@ -743,11 +406,10 @@ impl eframe::App for TiPlotApp {
 
                         ui.add_space(8.0);
 
-                        // FPS Indicator
-                        let fps_text = format!("{:.0} FPS", self.current_fps);
-                        let fps_color = if self.current_fps >= 55.0 {
+                        let fps_text = format!("{:.0} FPS", self.state.ui.current_fps);
+                        let fps_color = if self.state.ui.current_fps >= 55.0 {
                             egui::Color32::from_rgb(100, 200, 100)
-                        } else if self.current_fps >= 30.0 {
+                        } else if self.state.ui.current_fps >= 30.0 {
                             egui::Color32::from_rgb(200, 200, 100)
                         } else {
                             egui::Color32::from_rgb(200, 100, 100)
@@ -757,28 +419,33 @@ impl eframe::App for TiPlotApp {
                     });
                 });
             });
+    }
 
+    fn render_bottom_timeline_panel(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("timeline_panel")
             .exact_height(60.0)
             .show(ctx, |ui| {
-                self.last_viewport_width = self.max_time - self.min_time;
+                self.state.timeline.last_viewport_width =
+                    self.state.timeline.max_time - self.state.timeline.min_time;
 
                 render_timeline(
                     ui,
-                    self.global_min,
-                    self.global_max,
-                    &mut self.min_time,
-                    &mut self.max_time,
-                    &mut self.current_time,
-                    &mut self.is_playing,
-                    &mut self.playback_speed,
-                    &mut self.lock_to_last,
-                    &mut self.lock_viewport,
-                    &mut self.always_show_playback_tooltip,
+                    self.state.timeline.global_min,
+                    self.state.timeline.global_max,
+                    &mut self.state.timeline.min_time,
+                    &mut self.state.timeline.max_time,
+                    &mut self.state.timeline.current_time,
+                    &mut self.state.timeline.is_playing,
+                    &mut self.state.timeline.playback_speed,
+                    &mut self.state.timeline.lock_to_last,
+                    &mut self.state.timeline.lock_viewport,
+                    &mut self.state.timeline.always_show_playback_tooltip,
                 );
             });
+    }
 
-        if self.topic_panel_collapsed {
+    fn render_side_panels(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if self.state.panels.topic_panel_collapsed {
             egui::SidePanel::left("topics_panel_collapsed")
                 .exact_width(30.0)
                 .resizable(false)
@@ -790,7 +457,7 @@ impl eframe::App for TiPlotApp {
                             .on_hover_text("Show topics panel")
                             .clicked()
                         {
-                            self.topic_panel_collapsed = false;
+                            self.state.panels.topic_panel_collapsed = false;
                         }
                         ui.add_space(10.0);
                         ui.vertical(|ui| {
@@ -820,21 +487,21 @@ impl eframe::App for TiPlotApp {
                                 .on_hover_text("Hide topics panel")
                                 .clicked()
                             {
-                                self.topic_panel_collapsed = true;
+                                self.state.panels.topic_panel_collapsed = true;
                             }
                         });
                     });
                     ui.separator();
                     render_topic_panel(
                         ui,
-                        &self.data_store,
-                        &mut self.topic_selection,
-                        &mut self.dragged_item,
+                        &self.state.data.data_store,
+                        &mut self.state.panels.topic_selection,
+                        &mut self.state.layout.dragged_item,
                     );
                 });
         }
 
-        if self.view3d_panel_collapsed {
+        if self.state.panels.view3d_panel_collapsed {
             egui::SidePanel::right("view3d_panel_collapsed")
                 .exact_width(30.0)
                 .resizable(false)
@@ -846,7 +513,7 @@ impl eframe::App for TiPlotApp {
                             .on_hover_text("Show 3D view panel")
                             .clicked()
                         {
-                            self.view3d_panel_collapsed = false;
+                            self.state.panels.view3d_panel_collapsed = false;
                         }
                         ui.add_space(10.0);
                         ui.vertical(|ui| {
@@ -876,7 +543,7 @@ impl eframe::App for TiPlotApp {
                                 .on_hover_text("Hide 3D view panel")
                                 .clicked()
                             {
-                                self.view3d_panel_collapsed = true;
+                                self.state.panels.view3d_panel_collapsed = true;
                             }
 
                             if ui
@@ -884,8 +551,8 @@ impl eframe::App for TiPlotApp {
                                 .on_hover_text("Open Configuration")
                                 .clicked()
                             {
-                                self.view3d_panel.show_config_window =
-                                    !self.view3d_panel.show_config_window;
+                                self.state.panels.view3d_panel.show_config_window =
+                                    !self.state.panels.view3d_panel.show_config_window;
                             }
                         });
                     });
@@ -893,42 +560,66 @@ impl eframe::App for TiPlotApp {
                     render_view3d_panel(
                         ui,
                         frame,
-                        &mut self.view3d_panel,
-                        &self.data_store,
-                        self.current_time,
-                        &self.model_cache,
+                        &mut self.state.panels.view3d_panel,
+                        &self.state.data.data_store,
+                        self.state.timeline.current_time,
+                        &self.state.model_cache,
                     );
                 });
         }
+    }
 
+    fn render_central_panel(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             let mut behavior = TiPlotBehavior {
-                min_time: &mut self.min_time,
-                max_time: &mut self.max_time,
-                global_min: self.global_min,
-                global_max: self.global_max,
-                current_time: &mut self.current_time,
-                data_store: &self.data_store,
-                topic_selection: &self.topic_selection,
-                split_request: &mut self.split_request,
-                dragged_item: &mut self.dragged_item,
-                reset_sizes_request: &mut self.reset_sizes_request,
-                is_playing: &self.is_playing,
-                always_show_playback_tooltip: &self.always_show_playback_tooltip,
+                min_time: &mut self.state.timeline.min_time,
+                max_time: &mut self.state.timeline.max_time,
+                global_min: self.state.timeline.global_min,
+                global_max: self.state.timeline.global_max,
+                current_time: &mut self.state.timeline.current_time,
+                data_store: &self.state.data.data_store,
+                topic_selection: &self.state.panels.topic_selection,
+                split_request: &mut self.state.layout.split_request,
+                dragged_item: &mut self.state.layout.dragged_item,
+                reset_sizes_request: &mut self.state.layout.reset_sizes_request,
+                is_playing: &self.state.timeline.is_playing,
+                always_show_playback_tooltip: &self.state.timeline.always_show_playback_tooltip,
             };
-            self.tree.ui(&mut behavior, ui);
+            self.state.layout.tree.ui(&mut behavior, ui);
 
             if !ui.input(|i| i.pointer.primary_down()) {
-                self.dragged_item = None;
+                self.state.layout.dragged_item = None;
             }
         });
+    }
 
-        // Render the configuration window after all panels
-        render_config_window(ctx, &mut self.view3d_panel, &self.data_store);
+    fn render_configuration_window(&mut self, ctx: &egui::Context) {
+        render_config_window(
+            ctx,
+            &mut self.state.panels.view3d_panel,
+            &self.state.data.data_store,
+        );
+    }
+}
 
-        self.handle_split_request();
+impl eframe::App for TiPlotApp {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.state.ui.update_fps();
+        self.process_data(ctx, frame);
+        ctx.request_repaint();
 
-        self.handle_reset_sizes_request();
+        self.handle_keyboard_input(ctx);
+        self.state.timeline.update_playback(ctx);
+
+        self.handle_menu_actions(ctx, frame);
+        self.render_top_menu_bar(ctx, frame);
+        self.render_bottom_timeline_panel(ctx);
+        self.render_side_panels(ctx, frame);
+        self.render_central_panel(ctx);
+        self.render_configuration_window(ctx);
+
+        self.state.layout.handle_split_request();
+        self.state.layout.handle_reset_sizes_request();
     }
 }
 
