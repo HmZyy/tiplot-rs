@@ -1,9 +1,9 @@
 [Desktop Entry]
-Version=1.0
+Version=0.1.0
 Name=Tiplot
 Comment=TiPlot
-Exec=~/projects/hmzyy/tiplot-rs/tiplot-launch.sh
-Icon=~/projects/hmzyy/tiplot-rs/assets/icon.png
+Exec=sh -c 'if [ -x "$HOME/.local/bin/tiplot" ]; then "$HOME/.local/bin/tiplot"; elif [ -x "/usr/local/bin/tiplot" ]; then /usr/local/bin/tiplot; else notify-send "Tiplot" "Binary not found. Please run install script."; fi'
+Icon=$HOME/.local/share/icons/tiplot.png
 Terminal=false
 Type=Application
 Categories=Development;Utility;
