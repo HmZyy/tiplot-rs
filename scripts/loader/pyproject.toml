@@ -1,13 +1,18 @@
 [project]
 name = "loader"
 version = "0.1.0"
-description = "TiPlot loader"
+description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "pyarrow>=22.0.0",
-  "pymavlink>=2.4.49",
-  "pyqt6>=6.10.1",
-  "pyserial>=3.5",
-  "pyulog>=1.2.2",
+    "pyarrow>=22.0.0",
+    "pymavlink>=2.4.49",
+    "pyqt6>=6.10.1",
+    "pyserial>=3.5",
+    "pyulog>=1.2.2",
+]
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.17.0",
 ]
