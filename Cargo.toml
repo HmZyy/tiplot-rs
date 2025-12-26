@@ -1,0 +1,30 @@
+[package]
+name = "tiplot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = { version = "0.29", features = ["wgpu"] }
+egui = "0.29"
+egui_tiles = "0.10"
+egui-wgpu = "0.29"
+egui-phosphor = "0.7"
+wgpu = "22.0"
+arrow = { version = "53", features = ["ipc"] }
+arrow-ipc = "53"
+tokio = { version = "1", features = ["full"] }
+crossbeam-channel = "0.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+byteorder = "1.5"
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.11"
+bytemuck = { version = "1.14", features = ["derive"] }
+glam = { version = "0.29", features = ["serde"] }
+gltf = "1.4"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+natord = "1.0"
+rustc-hash = "1.1"
+directories = "5.0"
+rfd = { version = "0.15", features = ["async-std"] }

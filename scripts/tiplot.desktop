@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Name=Tiplot
+Comment=TiPlot
+Exec=~/projects/hmzyy/tiplot-rs/tiplot-launch.sh
+Icon=~/projects/hmzyy/tiplot-rs/assets/icon.png
+Terminal=false
+Type=Application
+Categories=Development;Utility;
+StartupNotify=true
