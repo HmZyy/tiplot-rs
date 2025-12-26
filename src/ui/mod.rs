@@ -5,6 +5,8 @@ pub mod panels;
 pub mod renderer;
 pub mod tiles;
 
+use std::process::Command;
+
 const COLOR_PALETTE: [[f32; 4]; 10] = [
     [0.12, 0.47, 0.71, 1.0], // Blue
     [1.00, 0.50, 0.05, 1.0], // Orange
@@ -40,4 +42,96 @@ pub fn calculate_grid_step(range: f32, target_steps: usize) -> f32 {
     };
 
     nice_step * mag
+}
+
+fn is_loader_available() -> bool {
+    if std::env::var("TIPLOT_LOADER_COMMAND").is_ok() {
+        return true;
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            #[cfg(unix)]
+            let loader_path = exe_dir.join("tiplot-loader");
+
+            #[cfg(windows)]
+            let loader_path = exe_dir.join("tiplot-loader.exe");
+
+            return loader_path.exists();
+        }
+    }
+
+    false
+}
+
+fn launch_loader() -> Result<(), String> {
+    if let Ok(cmd) = std::env::var("TIPLOT_LOADER_COMMAND") {
+        return launch_command(&cmd);
+    }
+
+    launch_loader_executable()
+}
+
+fn launch_command(cmd: &str) -> Result<(), String> {
+    #[cfg(unix)]
+    let result = Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .spawn()
+        .map_err(|e| e.to_string());
+
+    #[cfg(windows)]
+    let result = Command::new("cmd")
+        .arg("/C")
+        .arg(cmd)
+        .spawn()
+        .map_err(|e| e.to_string());
+
+    match result {
+        Ok(_) => {
+            eprintln!("✓ Launched loader: {}", cmd);
+            Ok(())
+        }
+        Err(e) => {
+            let msg = format!("Failed to launch command '{}': {}", cmd, e);
+            eprintln!("✗ {}", msg);
+            Err(msg)
+        }
+    }
+}
+
+fn launch_loader_executable() -> Result<(), String> {
+    let exe_path =
+        std::env::current_exe().map_err(|e| format!("Failed to get executable path: {}", e))?;
+
+    let exe_dir = exe_path
+        .parent()
+        .ok_or("Failed to get executable directory")?;
+
+    #[cfg(unix)]
+    let loader_path = exe_dir.join("tiplot-loader");
+
+    #[cfg(windows)]
+    let loader_path = exe_dir.join("tiplot-loader.exe");
+
+    if !loader_path.exists() {
+        let msg = format!(
+            "No loader found. Set TIPLOT_LOADER_COMMAND or place 'tiplot-loader' executable in: {}",
+            exe_dir.display()
+        );
+        eprintln!("✗ {}", msg);
+        return Err(msg);
+    }
+
+    match Command::new(&loader_path).spawn() {
+        Ok(_) => {
+            eprintln!("✓ Launched loader: {}", loader_path.display());
+            Ok(())
+        }
+        Err(e) => {
+            let msg = format!("Failed to launch '{}': {}", loader_path.display(), e);
+            eprintln!("✗ {}", msg);
+            Err(msg)
+        }
+    }
 }

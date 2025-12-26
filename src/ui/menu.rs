@@ -1,4 +1,4 @@
-use crate::ui::{layout::LayoutData, tiles::InterpolationMode};
+use crate::ui::{is_loader_available, layout::LayoutData, tiles::InterpolationMode};
 use eframe::egui;
 use egui_phosphor::regular as icons;
 use std::path::PathBuf;
@@ -92,7 +92,7 @@ pub fn render_menu_bar(
 
     egui::menu::bar(ui, |ui| {
         ui.menu_button("File", |ui| {
-            if let Ok(_loader_cmd) = std::env::var("TIPLOT_LOADER_COMMAND") {
+            if is_loader_available() {
                 if ui
                     .button(format!("{} Launch Loader", icons::ROCKET_LAUNCH))
                     .clicked()
@@ -100,7 +100,6 @@ pub fn render_menu_bar(
                     action = MenuAction::LaunchLoader;
                     ui.close_menu();
                 }
-
                 ui.separator();
             }
 
@@ -140,37 +139,20 @@ pub fn render_menu_bar(
             ui.menu_button(
                 format!("{} Interpolation Method", icons::CHART_LINE),
                 |ui| {
-                    if ui
-                        .selectable_label(
-                            current_interpolation_mode == InterpolationMode::PreviousPoint,
-                            "Previous Point",
-                        )
-                        .clicked()
-                    {
-                        action = MenuAction::SetInterpolationMode(InterpolationMode::PreviousPoint);
-                        ui.close_menu();
-                    }
+                    let modes = [
+                        (InterpolationMode::PreviousPoint, "Previous Point"),
+                        (InterpolationMode::Linear, "Linear"),
+                        (InterpolationMode::NextPoint, "Next Point"),
+                    ];
 
-                    if ui
-                        .selectable_label(
-                            current_interpolation_mode == InterpolationMode::Linear,
-                            "Linear",
-                        )
-                        .clicked()
-                    {
-                        action = MenuAction::SetInterpolationMode(InterpolationMode::Linear);
-                        ui.close_menu();
-                    }
-
-                    if ui
-                        .selectable_label(
-                            current_interpolation_mode == InterpolationMode::NextPoint,
-                            "Next Point",
-                        )
-                        .clicked()
-                    {
-                        action = MenuAction::SetInterpolationMode(InterpolationMode::NextPoint);
-                        ui.close_menu();
+                    for (mode, label) in modes {
+                        if ui
+                            .selectable_label(current_interpolation_mode == mode, label)
+                            .clicked()
+                        {
+                            action = MenuAction::SetInterpolationMode(mode);
+                            ui.close_menu();
+                        }
                     }
                 },
             );

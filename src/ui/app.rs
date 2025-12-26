@@ -703,18 +703,8 @@ impl eframe::App for TiPlotApp {
                             self.clear_data();
                         }
                         MenuAction::LaunchLoader => {
-                            if let Ok(cmd) = std::env::var("TIPLOT_LOADER_COMMAND") {
-                                #[cfg(unix)]
-                                {
-                                    match Command::new("sh").arg("-c").arg(&cmd).spawn() {
-                                        Ok(_) => {
-                                            eprintln!("Launched loader: {}", cmd);
-                                        }
-                                        Err(e) => {
-                                            eprintln!("Failed to launch loader: {}", e);
-                                        }
-                                    }
-                                }
+                            if let Err(e) = launch_loader() {
+                                self.menu_state.error_message = Some(e);
                             }
                         }
                         MenuAction::SetInterpolationMode(mode) => {
