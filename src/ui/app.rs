@@ -564,6 +564,7 @@ impl TiPlotApp {
                         &self.state.data.data_store,
                         self.state.timeline.current_time,
                         &self.state.model_cache,
+                        self.state.layout.global_interpolation_mode,
                     );
                 });
         }

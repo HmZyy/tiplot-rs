@@ -2,6 +2,7 @@ use crate::core::DataStore;
 use crate::ui::panels::tabs::config::{render_configuration_tab, VehicleConfig};
 use crate::ui::panels::tabs::gltf_loader::ModelCache;
 use crate::ui::panels::tabs::scene::{render_scene_tab, SceneState};
+use crate::ui::tiles::InterpolationMode;
 use eframe::egui;
 
 #[derive(Clone)]
@@ -35,6 +36,7 @@ pub fn render_view3d_panel(
     data_store: &DataStore,
     current_time: f32,
     model_cache: &ModelCache,
+    interpolation_mode: InterpolationMode,
 ) {
     render_scene_tab(
         ui,
@@ -44,6 +46,7 @@ pub fn render_view3d_panel(
         current_time,
         &mut panel_state.scene_state,
         model_cache,
+        interpolation_mode,
     );
 }
 

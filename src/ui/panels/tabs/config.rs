@@ -1,4 +1,4 @@
-use crate::core::DataStore;
+use crate::{core::DataStore, ui::tiles::InterpolationMode};
 use eframe::egui;
 use egui_phosphor::regular as icons;
 use serde::{Deserialize, Serialize};
@@ -150,21 +150,32 @@ impl Default for VehicleConfig {
 }
 
 impl VehicleConfig {
-    pub fn evaluate_at(&self, data_store: &DataStore, t: f32) -> (glam::Vec3, glam::Quat) {
-        let pos = self.evaluate_position(data_store, t);
-        let rot = self.evaluate_orientation(data_store, t);
+    pub fn evaluate_at(
+        &self,
+        data_store: &DataStore,
+        t: f32,
+        interpolation_mode: InterpolationMode,
+    ) -> (glam::Vec3, glam::Quat) {
+        let pos = self.evaluate_position(data_store, t, interpolation_mode);
+        let rot = self.evaluate_orientation(data_store, t, interpolation_mode);
         (pos, rot)
     }
 
-    fn get_value_at(data_store: &DataStore, topic: &str, col: &str, t: f32) -> f32 {
+    fn get_value_at(
+        data_store: &DataStore,
+        topic: &str,
+        col: &str,
+        t: f32,
+        interpolation_mode: InterpolationMode,
+    ) -> f32 {
         if let Some(timestamps) = data_store.get_column(topic, "timestamp") {
             if let Some(values) = data_store.get_column(topic, col) {
                 if timestamps.is_empty() || values.is_empty() {
                     return 0.0;
                 }
-                let idx = timestamps.partition_point(|&time| time <= t);
-                let safe_idx = idx.saturating_sub(1);
-                return values[safe_idx];
+
+                return Self::interpolate_value(timestamps, values, t, interpolation_mode)
+                    .unwrap_or(0.0);
             }
         }
         0.0
@@ -193,7 +204,75 @@ impl VehicleConfig {
         glam::Vec3::new(north, east, down)
     }
 
-    fn evaluate_position(&self, ds: &DataStore, t: f32) -> glam::Vec3 {
+    fn interpolate_value(
+        times: &[f32],
+        values: &[f32],
+        t: f32,
+        mode: InterpolationMode,
+    ) -> Option<f32> {
+        match mode {
+            InterpolationMode::PreviousPoint => {
+                let idx = times.partition_point(|&time| time < t);
+                if idx == 0 {
+                    None
+                } else {
+                    let prev_idx = idx - 1;
+                    if prev_idx < values.len() {
+                        Some(values[prev_idx])
+                    } else {
+                        None
+                    }
+                }
+            }
+            InterpolationMode::NextPoint => {
+                let idx = times.partition_point(|&time| time <= t);
+                if idx >= times.len() {
+                    None
+                } else if idx < values.len() {
+                    Some(values[idx])
+                } else {
+                    None
+                }
+            }
+            InterpolationMode::Linear => {
+                let idx = times.partition_point(|&time| time < t);
+
+                if idx == 0 {
+                    None
+                } else if idx >= times.len() {
+                    if !times.is_empty() && times.len() == values.len() {
+                        Some(values[values.len() - 1])
+                    } else {
+                        None
+                    }
+                } else {
+                    let prev_idx = idx - 1;
+                    if prev_idx < values.len() && idx < values.len() {
+                        let t0 = times[prev_idx];
+                        let t1 = times[idx];
+                        let v0 = values[prev_idx];
+                        let v1 = values[idx];
+
+                        if (t1 - t0).abs() < 1e-6 {
+                            Some(v0)
+                        } else {
+                            let alpha = (t - t0) / (t1 - t0);
+                            Some(v0 + alpha * (v1 - v0))
+                        }
+                    } else {
+                        None
+                    }
+                }
+            }
+        }
+    }
+
+    fn evaluate_position(
+        &self,
+        ds: &DataStore,
+        t: f32,
+        interpolation_mode: InterpolationMode,
+    ) -> glam::Vec3 {
         match &self.position {
             PositionMode::LocalNED {
                 topic,
@@ -202,9 +281,9 @@ impl VehicleConfig {
                 down,
                 ..
             } => {
-                let x = Self::get_value_at(ds, topic, north, t);
-                let y = Self::get_value_at(ds, topic, east, t);
-                let z = Self::get_value_at(ds, topic, down, t);
+                let x = Self::get_value_at(ds, topic, north, t, interpolation_mode);
+                let y = Self::get_value_at(ds, topic, east, t, interpolation_mode);
+                let z = Self::get_value_at(ds, topic, down, t, interpolation_mode);
                 glam::Vec3::new(x, y, z)
             }
             PositionMode::GlobalGPS {
@@ -213,13 +292,30 @@ impl VehicleConfig {
                 lon,
                 alt,
             } => {
-                // Get first position as reference origin
                 let (lat_ref, lon_ref, alt_ref) =
                     if let Some(timestamps) = ds.get_column(topic, "timestamp") {
                         if !timestamps.is_empty() {
-                            let lat_ref = Self::get_value_at(ds, topic, lat, timestamps[0]) as f64;
-                            let lon_ref = Self::get_value_at(ds, topic, lon, timestamps[0]) as f64;
-                            let alt_ref = Self::get_value_at(ds, topic, alt, timestamps[0]) as f64;
+                            let lat_ref = Self::get_value_at(
+                                ds,
+                                topic,
+                                lat,
+                                timestamps[0],
+                                InterpolationMode::PreviousPoint,
+                            ) as f64;
+                            let lon_ref = Self::get_value_at(
+                                ds,
+                                topic,
+                                lon,
+                                timestamps[0],
+                                InterpolationMode::PreviousPoint,
+                            ) as f64;
+                            let alt_ref = Self::get_value_at(
+                                ds,
+                                topic,
+                                alt,
+                                timestamps[0],
+                                InterpolationMode::PreviousPoint,
+                            ) as f64;
                             (lat_ref, lon_ref, alt_ref)
                         } else {
                             (0.0, 0.0, 0.0)
@@ -228,16 +324,21 @@ impl VehicleConfig {
                         (0.0, 0.0, 0.0)
                     };
 
-                let lat_val = Self::get_value_at(ds, topic, lat, t) as f64;
-                let lon_val = Self::get_value_at(ds, topic, lon, t) as f64;
-                let alt_val = Self::get_value_at(ds, topic, alt, t) as f64;
+                let lat_val = Self::get_value_at(ds, topic, lat, t, interpolation_mode) as f64;
+                let lon_val = Self::get_value_at(ds, topic, lon, t, interpolation_mode) as f64;
+                let alt_val = Self::get_value_at(ds, topic, alt, t, interpolation_mode) as f64;
 
                 Self::gps_to_ned(lat_val, lon_val, alt_val, lat_ref, lon_ref, alt_ref)
             }
         }
     }
 
-    fn evaluate_orientation(&self, ds: &DataStore, t: f32) -> glam::Quat {
+    fn evaluate_orientation(
+        &self,
+        ds: &DataStore,
+        t: f32,
+        interpolation_mode: InterpolationMode,
+    ) -> glam::Quat {
         match &self.orientation {
             OrientationMode::Static => glam::Quat::IDENTITY,
             OrientationMode::Quaternion {
@@ -247,10 +348,10 @@ impl VehicleConfig {
                 qz,
                 qw,
             } => {
-                let x = Self::get_value_at(ds, topic, qx, t);
-                let y = Self::get_value_at(ds, topic, qy, t);
-                let z = Self::get_value_at(ds, topic, qz, t);
-                let w = Self::get_value_at(ds, topic, qw, t);
+                let x = Self::get_value_at(ds, topic, qx, t, interpolation_mode);
+                let y = Self::get_value_at(ds, topic, qy, t, interpolation_mode);
+                let z = Self::get_value_at(ds, topic, qz, t, interpolation_mode);
+                let w = Self::get_value_at(ds, topic, qw, t, interpolation_mode);
 
                 let q = glam::Quat::from_xyzw(x, y, z, w);
                 if q.length_squared() < 1e-6 {
@@ -266,9 +367,9 @@ impl VehicleConfig {
                 yaw,
                 angle_unit,
             } => {
-                let mut r = Self::get_value_at(ds, topic, roll, t);
-                let mut p = Self::get_value_at(ds, topic, pitch, t);
-                let mut y = Self::get_value_at(ds, topic, yaw, t);
+                let mut r = Self::get_value_at(ds, topic, roll, t, interpolation_mode);
+                let mut p = Self::get_value_at(ds, topic, pitch, t, interpolation_mode);
+                let mut y = Self::get_value_at(ds, topic, yaw, t, interpolation_mode);
 
                 if matches!(angle_unit, AngleUnit::Degrees) {
                     r = r.to_radians();

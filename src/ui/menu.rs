@@ -141,8 +141,8 @@ pub fn render_menu_bar(
                 |ui| {
                     let modes = [
                         (InterpolationMode::PreviousPoint, "Previous Point"),
-                        (InterpolationMode::Linear, "Linear"),
                         (InterpolationMode::NextPoint, "Next Point"),
+                        (InterpolationMode::Linear, "Linear"),
                     ];
 
                     for (mode, label) in modes {

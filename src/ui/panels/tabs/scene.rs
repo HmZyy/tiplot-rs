@@ -1,6 +1,6 @@
-use crate::core::DataStore;
 use crate::ui::panels::tabs::config::VehicleConfig;
 use crate::ui::panels::tabs::gltf_loader::ModelCache;
+use crate::{core::DataStore, ui::tiles::InterpolationMode};
 use eframe::egui::{self, Color32, Pos2, Shape, Stroke};
 use egui_phosphor::regular as icons;
 use glam::{Mat4, Quat, Vec3, Vec4};
@@ -38,6 +38,7 @@ pub fn render_scene_tab(
     current_time: f32,
     state: &mut SceneState,
     model_cache: &ModelCache,
+    interpolation_mode: InterpolationMode,
 ) {
     ui.horizontal(|ui| {
         if !vehicles.is_empty() {
@@ -100,7 +101,7 @@ pub fn render_scene_tab(
         }
 
         let vehicle = &vehicles[state.follow_index];
-        let (pos, rot) = vehicle.evaluate_at(data_store, current_time);
+        let (pos, rot) = vehicle.evaluate_at(data_store, current_time, interpolation_mode);
 
         state.target = pos;
         vehicle_rotation = rot;
@@ -220,7 +221,7 @@ pub fn render_scene_tab(
                     continue;
                 }
 
-                let (pos, rot) = vehicle.evaluate_at(data_store, current_time);
+                let (pos, rot) = vehicle.evaluate_at(data_store, current_time, interpolation_mode);
 
                 match &vehicle.position {
                     crate::ui::panels::tabs::config::PositionMode::LocalNED {
