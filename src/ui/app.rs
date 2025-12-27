@@ -2,10 +2,7 @@ use crate::acquisition::{start_tcp_server, DataMessage};
 use crate::ui::app_state::AppState;
 use crate::ui::launch_loader;
 use crate::ui::menu::{render_menu_bar, MenuAction};
-use crate::ui::panels::tabs::gltf_loader::ModelCache;
-use crate::ui::panels::{
-    render_config_window, render_timeline, render_topic_panel, render_view3d_panel,
-};
+use crate::ui::panels::{render_config_window, render_timeline, render_topic_panel};
 use crate::ui::renderer::PlotRenderer;
 use crate::ui::tiles::TiPlotBehavior;
 use crossbeam_channel::unbounded;
@@ -33,22 +30,6 @@ impl TiPlotApp {
         let (tx, rx) = unbounded();
         start_tcp_server(tx, cc.egui_ctx.clone());
 
-        let mut model_cache = ModelCache::new();
-
-        const FIXED_WING_GLB: &[u8] = include_bytes!("../../assets/models/FixedWing.glb");
-        const QUAD_COPTER_GLB: &[u8] = include_bytes!("../../assets/models/QuadCopter.glb");
-        const DELTA_WING_GLB: &[u8] = include_bytes!("../../assets/models/DeltaWing.glb");
-
-        if let Err(e) = model_cache.load_from_bytes("FixedWing", FIXED_WING_GLB) {
-            eprintln!("✗ Failed to load Fixed Wing model: {}", e);
-        }
-        if let Err(e) = model_cache.load_from_bytes("QuadCopter", QUAD_COPTER_GLB) {
-            eprintln!("✗ Failed to load Quadcopter model: {}", e);
-        }
-        if let Err(e) = model_cache.load_from_bytes("DeltaWing", DELTA_WING_GLB) {
-            eprintln!("✗ Failed to load Delta Wing model: {}", e);
-        }
-
         setup_fonts(&cc.egui_ctx);
 
         let layouts_dir = if let Some(storage) = cc.storage {
@@ -62,7 +43,7 @@ impl TiPlotApp {
         };
 
         Self {
-            state: AppState::new(rx, layouts_dir, model_cache, renderer),
+            state: AppState::new(rx, layouts_dir, renderer),
         }
     }
 
@@ -426,7 +407,7 @@ impl TiPlotApp {
             });
     }
 
-    fn render_side_panels(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn render_side_panels(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.state.panels.topic_panel_collapsed {
             egui::SidePanel::left("topics_panel_collapsed")
                 .exact_width(30.0)
@@ -539,15 +520,6 @@ impl TiPlotApp {
                         });
                     });
                     ui.separator();
-                    render_view3d_panel(
-                        ui,
-                        frame,
-                        &mut self.state.panels.view3d_panel,
-                        &self.state.data.data_store,
-                        self.state.timeline.current_time,
-                        &self.state.model_cache,
-                        self.state.layout.global_interpolation_mode,
-                    );
                 });
         }
     }

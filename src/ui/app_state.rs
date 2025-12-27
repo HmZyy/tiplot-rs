@@ -1,7 +1,6 @@
 use crate::core::DataStore;
 use crate::ui::layout::LayoutData;
-use crate::ui::panels::tabs::config::VehicleConfig;
-use crate::ui::panels::tabs::gltf_loader::ModelCache;
+use crate::ui::panels::scene::config::VehicleConfig;
 use crate::ui::panels::{TopicPanelSelection, View3DPanel};
 use crate::ui::renderer::PlotRenderer;
 use crate::ui::tiles::{InterpolationMode, PlotTile};
@@ -421,7 +420,6 @@ pub struct AppState {
     pub data: DataState,
     pub layout: LayoutState,
     pub ui: UIState,
-    pub model_cache: ModelCache,
     pub renderer: Arc<Mutex<PlotRenderer>>,
 }
 
@@ -429,7 +427,6 @@ impl AppState {
     pub fn new(
         rx: Receiver<crate::acquisition::DataMessage>,
         layouts_dir: PathBuf,
-        model_cache: ModelCache,
         renderer: Arc<Mutex<PlotRenderer>>,
     ) -> Self {
         Self {
@@ -438,7 +435,6 @@ impl AppState {
             data: DataState::new(rx),
             layout: LayoutState::new(),
             ui: UIState::new(layouts_dir),
-            model_cache,
             renderer,
         }
     }

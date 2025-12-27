@@ -1,14 +1,10 @@
 use crate::core::DataStore;
-use crate::ui::panels::tabs::config::{render_configuration_tab, VehicleConfig};
-use crate::ui::panels::tabs::gltf_loader::ModelCache;
-use crate::ui::panels::tabs::scene::{render_scene_tab, SceneState};
-use crate::ui::tiles::InterpolationMode;
+use crate::ui::panels::scene::config::{render_configuration_tab, VehicleConfig};
 use eframe::egui;
 
 #[derive(Clone)]
 pub struct View3DPanel {
     pub vehicles: Vec<VehicleConfig>,
-    pub scene_state: SceneState,
     pub show_config_window: bool,
 }
 
@@ -17,7 +13,6 @@ impl View3DPanel {
         let default_vehicle = VehicleConfig::default();
         Self {
             vehicles: vec![default_vehicle],
-            scene_state: SceneState::default(),
             show_config_window: false,
         }
     }
@@ -27,27 +22,6 @@ impl Default for View3DPanel {
     fn default() -> Self {
         Self::new()
     }
-}
-
-pub fn render_view3d_panel(
-    ui: &mut egui::Ui,
-    frame: &eframe::Frame,
-    panel_state: &mut View3DPanel,
-    data_store: &DataStore,
-    current_time: f32,
-    model_cache: &ModelCache,
-    interpolation_mode: InterpolationMode,
-) {
-    render_scene_tab(
-        ui,
-        frame,
-        &mut panel_state.vehicles,
-        data_store,
-        current_time,
-        &mut panel_state.scene_state,
-        model_cache,
-        interpolation_mode,
-    );
 }
 
 pub fn render_config_window(

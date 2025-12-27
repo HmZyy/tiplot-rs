@@ -1,4 +1,4 @@
-use crate::ui::panels::tabs::config::VehicleConfig;
+use crate::ui::panels::scene::config::VehicleConfig;
 use crate::ui::tiles::PlotTile;
 use anyhow::{Context, Result};
 use egui_tiles::{Container, Tile, Tiles, Tree};
