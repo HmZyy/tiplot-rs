@@ -3,10 +3,12 @@ use crate::ui::layout::LayoutData;
 use crate::ui::panels::tabs::config::VehicleConfig;
 use crate::ui::panels::tabs::gltf_loader::ModelCache;
 use crate::ui::panels::{TopicPanelSelection, View3DPanel};
+use crate::ui::renderer::PlotRenderer;
 use crate::ui::tiles::{InterpolationMode, PlotTile};
 use crossbeam_channel::Receiver;
 use egui_tiles::{LinearDir, TileId, Tiles, Tree};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 pub struct TimelineState {
     pub min_time: f32,
@@ -420,6 +422,7 @@ pub struct AppState {
     pub layout: LayoutState,
     pub ui: UIState,
     pub model_cache: ModelCache,
+    pub renderer: Arc<Mutex<PlotRenderer>>,
 }
 
 impl AppState {
@@ -427,6 +430,7 @@ impl AppState {
         rx: Receiver<crate::acquisition::DataMessage>,
         layouts_dir: PathBuf,
         model_cache: ModelCache,
+        renderer: Arc<Mutex<PlotRenderer>>,
     ) -> Self {
         Self {
             timeline: TimelineState::new(),
@@ -435,6 +439,7 @@ impl AppState {
             layout: LayoutState::new(),
             ui: UIState::new(layouts_dir),
             model_cache,
+            renderer,
         }
     }
 

@@ -25,14 +25,10 @@ pub fn setup_fonts(ctx: &egui::Context) {
 
 impl TiPlotApp {
     pub fn new(cc: &eframe::CreationContext) -> Self {
-        if let Some(wgpu_state) = cc.wgpu_render_state.as_ref() {
-            let renderer = PlotRenderer::new(&wgpu_state.device, wgpu_state.target_format);
-            wgpu_state
-                .renderer
-                .write()
-                .callback_resources
-                .insert(renderer);
-        }
+        let gl = cc.gl.as_ref().expect("OpenGL not initialized").clone();
+        let renderer = PlotRenderer::new(gl);
+
+        let renderer = std::sync::Arc::new(std::sync::Mutex::new(renderer));
 
         let (tx, rx) = unbounded();
         start_tcp_server(tx, cc.egui_ctx.clone());
@@ -66,7 +62,7 @@ impl TiPlotApp {
         };
 
         Self {
-            state: AppState::new(rx, layouts_dir, model_cache),
+            state: AppState::new(rx, layouts_dir, model_cache, renderer),
         }
     }
 
@@ -153,15 +149,8 @@ impl TiPlotApp {
         }
     }
 
-    fn reupload_all_traces(&mut self, frame: &mut eframe::Frame) {
-        let wgpu_state = frame.wgpu_render_state().expect("WGPU not initialized");
-        let device = &wgpu_state.device;
-
-        let mut renderer_lock = wgpu_state.renderer.write();
-        let renderer = renderer_lock
-            .callback_resources
-            .get_mut::<PlotRenderer>()
-            .unwrap();
+    fn reupload_all_traces(&mut self, _frame: &mut eframe::Frame) {
+        let mut renderer = self.state.renderer.lock().unwrap();
 
         for (topic, cols) in &self.state.data.data_store.topics {
             if let Some(timestamps) = cols.get("timestamp") {
@@ -169,7 +158,7 @@ impl TiPlotApp {
                     if col_name == "timestamp" {
                         continue;
                     }
-                    renderer.upload_trace(device, topic, col_name, timestamps, values);
+                    renderer.upload_trace(topic, col_name, timestamps, values);
                 }
             }
         }
@@ -273,15 +262,8 @@ impl TiPlotApp {
         }
     }
 
-    fn process_data(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        let wgpu_state = frame.wgpu_render_state().expect("WGPU not initialized");
-        let device = &wgpu_state.device;
-
-        let mut renderer_lock = wgpu_state.renderer.write();
-        let renderer = renderer_lock
-            .callback_resources
-            .get_mut::<PlotRenderer>()
-            .unwrap();
+    fn process_data(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let mut renderer = self.state.renderer.lock().unwrap();
 
         let mut received_data = false;
         let mut batches_processed = 0;
@@ -332,7 +314,7 @@ impl TiPlotApp {
                                 if col_name == "timestamp" {
                                     continue;
                                 }
-                                renderer.upload_trace(device, &topic, col_name, timestamps, values);
+                                renderer.upload_trace(&topic, col_name, timestamps, values);
                             }
                         }
                     }
@@ -585,6 +567,7 @@ impl TiPlotApp {
                 reset_sizes_request: &mut self.state.layout.reset_sizes_request,
                 is_playing: &self.state.timeline.is_playing,
                 always_show_playback_tooltip: &self.state.timeline.always_show_playback_tooltip,
+                renderer: &self.state.renderer,
             };
             self.state.layout.tree.ui(&mut behavior, ui);
 

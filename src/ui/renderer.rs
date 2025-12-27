@@ -1,149 +1,113 @@
-use eframe::egui;
-use eframe::egui_wgpu::{CallbackResources, CallbackTrait};
-use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
-use wgpu::util::DeviceExt;
+use eframe::glow;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+const VERTEX_SHADER: &str = r#"
+#version 330 core
+layout(location = 0) in vec2 a_data;
+uniform vec4 u_bounds;
+
+void main() {
+    float t = a_data.x;
+    float v = a_data.y;
+
+    float min_t = u_bounds.x;
+    float max_t = u_bounds.y;
+    float min_v = u_bounds.z;
+    float max_v = u_bounds.w;
+
+    float t_norm = (t - min_t) / (max_t - min_t);
+    float v_norm = (v - min_v) / (max_v - min_v);
+
+    float x = t_norm * 2.0 - 1.0;
+    float y = v_norm * 2.0 - 1.0;
+
+    gl_Position = vec4(x, y, 0.0, 1.0);
+    gl_PointSize = 5.0;
+}
+"#;
+
+const FRAGMENT_SHADER: &str = r#"
+#version 330 core
+out vec4 FragColor;
+uniform vec4 u_color;
+
+void main() {
+    FragColor = u_color;
+}
+"#;
 
 pub struct TraceGpuResource {
-    pub buffer: wgpu::Buffer,
-    pub count: u32,
+    pub vbo: glow::Buffer,
+    pub vao: glow::VertexArray,
+    pub count: i32,
 }
 
 pub struct PlotRenderer {
-    pub pipeline: wgpu::RenderPipeline,
-    pub point_pipeline: wgpu::RenderPipeline,
-
-    pub bind_group_layout: wgpu::BindGroupLayout,
-
-    pub buffers: HashMap<String, TraceGpuResource>,
-
-    pub paint_jobs: Mutex<VecDeque<wgpu::BindGroup>>,
+    gl: Arc<glow::Context>,
+    shader_program: glow::Program,
+    buffers: HashMap<String, TraceGpuResource>,
 }
 
 impl PlotRenderer {
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Plot Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shader.wgsl").into()),
-        });
+    pub fn new(gl: Arc<glow::Context>) -> Self {
+        unsafe {
+            let shader_program = Self::create_shader_program(&gl);
 
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Plot Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Plot Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Plot Line Render Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineStrip,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
-
-        let point_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Plot Point Render Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::PointList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
-
-        Self {
-            pipeline,
-            point_pipeline,
-            bind_group_layout,
-            buffers: HashMap::new(),
-            paint_jobs: Mutex::new(VecDeque::new()),
+            Self {
+                gl,
+                shader_program,
+                buffers: HashMap::new(),
+            }
         }
     }
 
-    pub fn upload_trace(
-        &mut self,
-        device: &wgpu::Device,
-        topic: &str,
-        col: &str,
-        times: &[f32],
-        values: &[f32],
-    ) {
+    unsafe fn create_shader_program(gl: &glow::Context) -> glow::Program {
+        use glow::HasContext as _;
+
+        let vertex_shader = gl.create_shader(glow::VERTEX_SHADER).unwrap();
+        gl.shader_source(vertex_shader, VERTEX_SHADER);
+        gl.compile_shader(vertex_shader);
+
+        if !gl.get_shader_compile_status(vertex_shader) {
+            panic!(
+                "Vertex shader compilation failed: {}",
+                gl.get_shader_info_log(vertex_shader)
+            );
+        }
+
+        let fragment_shader = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
+        gl.shader_source(fragment_shader, FRAGMENT_SHADER);
+        gl.compile_shader(fragment_shader);
+
+        if !gl.get_shader_compile_status(fragment_shader) {
+            panic!(
+                "Fragment shader compilation failed: {}",
+                gl.get_shader_info_log(fragment_shader)
+            );
+        }
+
+        let program = gl.create_program().unwrap();
+        gl.attach_shader(program, vertex_shader);
+        gl.attach_shader(program, fragment_shader);
+        gl.link_program(program);
+
+        if !gl.get_program_link_status(program) {
+            panic!(
+                "Shader program linking failed: {}",
+                gl.get_program_info_log(program)
+            );
+        }
+
+        gl.delete_shader(vertex_shader);
+        gl.delete_shader(fragment_shader);
+
+        program
+    }
+
+    pub fn upload_trace(&mut self, topic: &str, col: &str, times: &[f32], values: &[f32]) {
+        use glow::HasContext as _;
+
         let key = format!("{}/{}", topic, col);
 
         if times.is_empty() || values.is_empty() {
@@ -157,106 +121,100 @@ impl PlotRenderer {
             .flat_map(|(t, v)| [*t, *v])
             .collect();
 
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("Trace Buffer: {}", key)),
-            contents: bytemuck::cast_slice(&data),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        unsafe {
+            let vao = self.gl.create_vertex_array().unwrap();
+            self.gl.bind_vertex_array(Some(vao));
 
-        self.buffers.insert(
-            key,
-            TraceGpuResource {
-                buffer,
-                count: times.len() as u32,
-            },
-        );
-    }
+            let vbo = self.gl.create_buffer().unwrap();
+            self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+            self.gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                bytemuck::cast_slice(&data),
+                glow::STATIC_DRAW,
+            );
 
-    pub fn _get_trace(&self, topic: &str, col: &str) -> Option<&TraceGpuResource> {
-        let key = format!("{}/{}", topic, col);
-        self.buffers.get(&key)
-    }
-}
+            // Configure vertex attribute (location 0: vec2)
+            self.gl.enable_vertex_attrib_array(0);
+            self.gl.vertex_attrib_pointer_f32(
+                0,                                     // location
+                2,                                     // size (vec2)
+                glow::FLOAT,                           // type
+                false,                                 // normalized
+                2 * std::mem::size_of::<f32>() as i32, // stride
+                0,                                     // offset
+            );
 
-pub struct RealPlotCallback {
-    pub topic: String,
-    pub col: String,
-    pub bounds: [f32; 4], // [min_time, max_time, min_val, max_val]
-    pub color: [f32; 4],  // RGBA
-    pub scatter_mode: bool,
-}
+            self.gl.bind_vertex_array(None);
+            self.gl.bind_buffer(glow::ARRAY_BUFFER, None);
 
-impl CallbackTrait for RealPlotCallback {
-    fn prepare(
-        &self,
-        device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        _screen: &eframe::egui_wgpu::ScreenDescriptor,
-        _encoder: &mut wgpu::CommandEncoder,
-        resources: &mut CallbackResources,
-    ) -> Vec<wgpu::CommandBuffer> {
-        let renderer = resources.get::<PlotRenderer>().unwrap();
-        let key = format!("{}/{}", self.topic, self.col);
-
-        if let Some(trace_res) = renderer.buffers.get(&key) {
-            let point_size = 3.0f32;
-            let uniforms_data: Vec<f32> = self
-                .bounds
-                .iter()
-                .chain(self.color.iter())
-                .cloned()
-                .chain([point_size, 0.0, 0.0, 0.0].iter().cloned()) // params vec4
-                .collect();
-
-            let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Plot Uniform Buffer"),
-                contents: bytemuck::cast_slice(&uniforms_data),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Plot Bind Group"),
-                layout: &renderer.bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: uniform_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: trace_res.buffer.as_entire_binding(),
-                    },
-                ],
-            });
-
-            renderer.paint_jobs.lock().unwrap().push_back(bind_group);
+            self.buffers.insert(
+                key,
+                TraceGpuResource {
+                    vbo,
+                    vao,
+                    count: times.len() as i32,
+                },
+            );
         }
-
-        Vec::new()
     }
 
-    fn paint<'a>(
-        &'a self,
-        _info: egui::PaintCallbackInfo,
-        render_pass: &mut wgpu::RenderPass<'static>,
-        resources: &'a CallbackResources,
+    pub fn render_trace(
+        &self,
+        topic: &str,
+        col: &str,
+        bounds: [f32; 4],
+        color: [f32; 4],
+        scatter_mode: bool,
     ) {
-        let renderer = resources.get::<PlotRenderer>().unwrap();
-        let key = format!("{}/{}", self.topic, self.col);
+        use glow::HasContext as _;
 
-        if let Some(trace_res) = renderer.buffers.get(&key) {
-            let mut jobs = renderer.paint_jobs.lock().unwrap();
+        let key = format!("{}/{}", topic, col);
 
-            if let Some(bg) = jobs.pop_front() {
-                if self.scatter_mode {
-                    render_pass.set_pipeline(&renderer.point_pipeline);
+        if let Some(trace) = self.buffers.get(&key) {
+            unsafe {
+                self.gl.use_program(Some(self.shader_program));
+
+                // Set uniforms
+                let bounds_loc = self
+                    .gl
+                    .get_uniform_location(self.shader_program, "u_bounds");
+                self.gl.uniform_4_f32(
+                    bounds_loc.as_ref(),
+                    bounds[0],
+                    bounds[1],
+                    bounds[2],
+                    bounds[3],
+                );
+
+                let color_loc = self.gl.get_uniform_location(self.shader_program, "u_color");
+                self.gl
+                    .uniform_4_f32(color_loc.as_ref(), color[0], color[1], color[2], color[3]);
+
+                // Draw
+                self.gl.bind_vertex_array(Some(trace.vao));
+
+                if scatter_mode {
+                    self.gl.draw_arrays(glow::POINTS, 0, trace.count);
                 } else {
-                    render_pass.set_pipeline(&renderer.pipeline);
+                    self.gl.draw_arrays(glow::LINE_STRIP, 0, trace.count);
                 }
 
-                render_pass.set_bind_group(0, &bg, &[]);
-                render_pass.draw(0..trace_res.count, 0..1);
+                self.gl.bind_vertex_array(None);
             }
+        }
+    }
+}
+
+impl Drop for PlotRenderer {
+    fn drop(&mut self) {
+        use glow::HasContext as _;
+
+        unsafe {
+            for (_, resource) in self.buffers.drain() {
+                self.gl.delete_buffer(resource.vbo);
+                self.gl.delete_vertex_array(resource.vao);
+            }
+            self.gl.delete_program(self.shader_program);
         }
     }
 }

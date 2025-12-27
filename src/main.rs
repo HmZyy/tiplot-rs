@@ -12,7 +12,7 @@ fn main() -> eframe::Result {
     let _guard = rt.enter();
 
     let options = eframe::NativeOptions {
-        renderer: eframe::Renderer::Wgpu,
+        renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 720.0])
             .with_title("TiPlot"),

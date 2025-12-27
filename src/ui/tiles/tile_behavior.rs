@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use super::PlotTile;
 use crate::core::DataStore;
 use crate::ui::panels::TopicPanelSelection;
-use crate::ui::renderer::RealPlotCallback;
+use crate::ui::renderer::PlotRenderer;
 use crate::ui::tiles::render_cursor_tooltip;
 use crate::ui::{calculate_grid_step, get_trace_color};
 use eframe::egui;
@@ -21,6 +23,7 @@ pub struct TiPlotBehavior<'a> {
     pub reset_sizes_request: &'a mut bool,
     pub is_playing: &'a bool,
     pub always_show_playback_tooltip: &'a bool,
+    pub renderer: &'a std::sync::Arc<std::sync::Mutex<PlotRenderer>>,
 }
 
 impl<'a> Behavior<PlotTile> for TiPlotBehavior<'a> {
@@ -304,19 +307,38 @@ impl<'a> Behavior<PlotTile> for TiPlotBehavior<'a> {
         self.draw_grid(ui, rect, min_y, max_y);
 
         for trace in &tile.traces {
-            let cb = eframe::egui_wgpu::Callback::new_paint_callback(
+            let renderer = self.renderer.clone();
+            let topic = trace.topic.clone();
+            let col = trace.col.clone();
+            let bounds = [*self.min_time, *self.max_time, min_y, max_y];
+            let color = trace.color;
+            let scatter_mode = tile.scatter_mode;
+
+            let callback = egui::PaintCallback {
                 rect,
-                RealPlotCallback {
-                    topic: trace.topic.clone(),
-                    col: trace.col.clone(),
-                    bounds: [*self.min_time, *self.max_time, min_y, max_y],
-                    color: trace.color,
-                    scatter_mode: tile.scatter_mode,
-                },
-            );
-            ui.painter().add(cb);
+                callback: Arc::new(egui_glow::CallbackFn::new(move |_info, painter| {
+                    use eframe::glow::HasContext as _;
+
+                    let gl = painter.gl();
+                    let renderer = renderer.lock().unwrap();
+
+                    unsafe {
+                        // Save/set OpenGL state
+                        gl.enable(glow::BLEND);
+                        gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+                        gl.disable(glow::DEPTH_TEST);
+                        gl.disable(glow::SCISSOR_TEST);
+
+                        // Render the trace
+                        renderer.render_trace(&topic, &col, bounds, color, scatter_mode);
+                    }
+                })),
+            };
+
+            ui.painter().add(callback);
         }
 
+        // Draw playback cursor
         if *self.current_time >= *self.min_time && *self.current_time <= *self.max_time {
             let time_span = *self.max_time - *self.min_time;
             if time_span > 0.0 {
@@ -333,6 +355,7 @@ impl<'a> Behavior<PlotTile> for TiPlotBehavior<'a> {
             }
         }
 
+        // Handle cursors and tooltips
         if *self.always_show_playback_tooltip || modifiers.alt {
             self.handle_playback_cursor(ui, rect, tile, min_y, max_y);
         } else if !context_menu_showing {
@@ -345,6 +368,7 @@ impl<'a> Behavior<PlotTile> for TiPlotBehavior<'a> {
 
         self.draw_legend(ui, rect, tile);
 
+        // Show info window if requested
         if tile.show_info_window {
             egui::Window::new(format!("Plot Info {:?}", tile_id))
                 .collapsible(false)
