@@ -1,5 +1,6 @@
 use crate::core::DataStore;
 use crate::ui::panels::scene::config::{render_configuration_tab, VehicleConfig};
+use crate::ui::panels::scene_3d::Scene3D;
 use eframe::egui;
 
 #[derive(Clone)]
@@ -24,6 +25,34 @@ impl Default for View3DPanel {
     }
 }
 
+pub struct View3DState {
+    pub scene: Scene3D,
+}
+
+impl View3DState {
+    pub fn new() -> Self {
+        Self {
+            scene: Scene3D::new(),
+        }
+    }
+}
+
+impl Default for View3DState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub fn render_view3d_panel(
+    ui: &mut egui::Ui,
+    _panel_state: &View3DPanel,
+    scene_state: &mut View3DState,
+) {
+    let available_rect = ui.available_rect_before_wrap();
+
+    scene_state.scene.render(ui, available_rect);
+}
+
 pub fn render_config_window(
     ctx: &egui::Context,
     panel_state: &mut View3DPanel,
@@ -39,6 +68,6 @@ pub fn render_config_window(
         .scroll([false, true])
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
-            render_configuration_tab(ui, &mut panel_state.vehicles, data_store);
+            render_configuration_tab(ui, &mut panel_state.vehicles.clone(), data_store);
         });
 }

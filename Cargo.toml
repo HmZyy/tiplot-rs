@@ -28,3 +28,4 @@ natord = "1.0"
 rustc-hash = "1.1"
 directories = "5.0"
 rfd = { version = "0.15", features = ["async-std"] }
+three-d = "0.17"

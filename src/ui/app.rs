@@ -2,7 +2,9 @@ use crate::acquisition::{start_tcp_server, DataMessage};
 use crate::ui::app_state::AppState;
 use crate::ui::launch_loader;
 use crate::ui::menu::{render_menu_bar, MenuAction};
-use crate::ui::panels::{render_config_window, render_timeline, render_topic_panel};
+use crate::ui::panels::{
+    render_config_window, render_timeline, render_topic_panel, render_view3d_panel,
+};
 use crate::ui::renderer::PlotRenderer;
 use crate::ui::tiles::TiPlotBehavior;
 use crossbeam_channel::unbounded;
@@ -520,6 +522,12 @@ impl TiPlotApp {
                         });
                     });
                     ui.separator();
+
+                    render_view3d_panel(
+                        ui,
+                        &self.state.panels.view3d_panel,
+                        &mut self.state.panels.view3d_state,
+                    );
                 });
         }
     }

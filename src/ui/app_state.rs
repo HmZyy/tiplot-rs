@@ -1,6 +1,7 @@
 use crate::core::DataStore;
 use crate::ui::layout::LayoutData;
 use crate::ui::panels::scene::config::VehicleConfig;
+use crate::ui::panels::view3d_panel::View3DState;
 use crate::ui::panels::{TopicPanelSelection, View3DPanel};
 use crate::ui::renderer::PlotRenderer;
 use crate::ui::tiles::{InterpolationMode, PlotTile};
@@ -96,6 +97,7 @@ pub struct PanelState {
     pub view3d_panel_collapsed: bool,
     pub topic_selection: TopicPanelSelection,
     pub view3d_panel: View3DPanel,
+    pub view3d_state: View3DState,
 }
 
 impl PanelState {
@@ -105,6 +107,7 @@ impl PanelState {
             view3d_panel_collapsed: true,
             topic_selection: TopicPanelSelection::default(),
             view3d_panel: View3DPanel::new(),
+            view3d_state: View3DState::new(),
         }
     }
 }
