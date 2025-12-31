@@ -91,7 +91,7 @@ impl Scene3D {
             gl.delete_shader(vertex_shader);
             gl.delete_shader(fragment_shader);
 
-            let grid_size = 50.0;
+            let grid_size = 500.0;
             let grid_spacing = 5.0;
             let num_lines = (grid_size / grid_spacing) as i32;
 
