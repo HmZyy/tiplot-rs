@@ -199,7 +199,7 @@ pub fn render_scene_tab(
                 }
             };
 
-            let grid_extent = (state.distance * 3.0).max(100.0);
+            let grid_extent = (state.distance * 3.0).max(400.0);
 
             draw_grid_and_axes(
                 &painter,
@@ -473,7 +473,7 @@ fn draw_grid_and_axes(
     let grid_center_y = (center.y / step).round() * step;
     let grid_z = 0.0;
 
-    let segments = 20;
+    let segments = 5;
 
     let mut x = grid_center_x - start;
     while x <= grid_center_x + start {
