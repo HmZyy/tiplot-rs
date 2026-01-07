@@ -15,6 +15,29 @@ class MAVLinkStreamer(QObject):
     log_signal = pyqtSignal(str)
     status_signal = pyqtSignal(str)
     
+    # Format: {message_type: id_field_name}
+    SPLIT_BY_ID = {
+        'BATTERY_STATUS': 'id',
+        # 'ESC_STATUS': 'index',
+        # 'SERVO_OUTPUT_RAW': 'port',
+    }
+    
+    # Format: {message_type: {field_name: array_length}}
+    EXPAND_ARRAYS = {
+        'BATTERY_STATUS': {
+            'voltages': 10,
+            'voltages_ext': 4,
+        },
+        # 'ESC_STATUS': {
+        #     'rpm': 4,
+        #     'voltage': 4,
+        #     'current': 4,
+        # },
+        # 'RC_CHANNELS': {
+        #     'channels': 18,
+        # },
+    }
+    
     def __init__(self, connection_string, baudrate, host, port, update_rate_hz):
         super().__init__()
         self.connection_string = connection_string
@@ -51,6 +74,27 @@ class MAVLinkStreamer(QObject):
     def get_current_time_us(self):
         return int(time.time() * 1_000_000)
     
+    def get_topic_name(self, msg):
+        msg_type = msg.get_type()
+        
+        if msg_type in self.SPLIT_BY_ID:
+            id_field = self.SPLIT_BY_ID[msg_type]
+            try:
+                id_value = getattr(msg, id_field, 0)
+                return f"{msg_type}_{id_value}"
+            except AttributeError:
+                return msg_type
+        
+        return msg_type
+    
+    def get_array_fields_for_message(self, msg_type):
+        return self.EXPAND_ARRAYS.get(msg_type, {})
+    
+    def should_expand_field(self, msg_type, field_name):
+        """Check if a field should be expanded into individual columns"""
+        array_config = self.get_array_fields_for_message(msg_type)
+        return field_name in array_config
+    
     def connect_mavlink(self):
         try:
             self.log_signal.emit(f"Connecting to MAVLink on {self.connection_string}...")
@@ -78,15 +122,16 @@ class MAVLinkStreamer(QObject):
                     continue
                 
                 current_time_us = self.get_current_time_us()
+                topic_name = self.get_topic_name(msg)
                 
                 with self.buffer_lock:
-                    self.data_buffers[msg_type].append({
+                    self.data_buffers[topic_name].append({
                         'timestamp': current_time_us,
                         'msg': msg
                     })
                     
-                    if msg_type not in self.seen_message_types:
-                        self.seen_message_types.add(msg_type)
+                    if topic_name not in self.seen_message_types:
+                        self.seen_message_types.add(topic_name)
                         
             except Exception as e:
                 if self.running:
@@ -101,12 +146,15 @@ class MAVLinkStreamer(QObject):
             return 0
         return value
     
-    def create_table_from_messages(self, msg_type, messages):
+    def create_table_from_messages(self, topic_name, messages):
         if not messages:
             return None
         
         first_msg = messages[0]['msg']
+        msg_type = first_msg.get_type()
         fieldnames = first_msg.get_fieldnames()
+        
+        array_config = self.get_array_fields_for_message(msg_type)
         
         data = defaultdict(list)
         data['timestamp'] = []
@@ -119,17 +167,51 @@ class MAVLinkStreamer(QObject):
             for field in fieldnames:
                 try:
                     value = getattr(msg, field)
-                    data[field].append(value)
+                    
+                    # Handle array expansion for configured fields
+                    if field in array_config and isinstance(value, (list, tuple)):
+                        expected_length = array_config[field]
+                        for i in range(expected_length):
+                            expanded_field_name = f"{field}_{i}"
+                            if i < len(value):
+                                data[expanded_field_name].append(value[i])
+                            else:
+                                # Pad with None if array is shorter than expected
+                                data[expanded_field_name].append(None)
+                    else:
+                        # Normal field handling
+                        data[field].append(value)
+                        
                 except AttributeError:
                     data[field].append(None)
         
         arrays = []
         names = []
         
+        # Add timestamp column
         arrays.append(pa.array(data['timestamp'], type=pa.int64()))
         names.append('timestamp')
         
+        # Process all other fields
         for field in fieldnames:
+            # Skip fields that were expanded
+            if field in array_config:
+                expected_length = array_config[field]
+                for i in range(expected_length):
+                    expanded_field_name = f"{field}_{i}"
+                    if expanded_field_name in data:
+                        values = data[expanded_field_name]
+                        try:
+                            arrays.append(pa.array(values))
+                            names.append(expanded_field_name)
+                        except (pa.ArrowInvalid, pa.ArrowTypeError):
+                            # Fallback to string conversion
+                            string_values = [str(v) if v is not None else "" for v in values]
+                            arrays.append(pa.array(string_values, type=pa.string()))
+                            names.append(expanded_field_name)
+                continue
+            
+            # Handle non-expanded fields
             values = data[field]
             
             if not values or all(v is None for v in values):
@@ -168,7 +250,7 @@ class MAVLinkStreamer(QObject):
         tables = {}
         
         with self.buffer_lock:
-            for msg_type, buffer in self.data_buffers.items():
+            for topic_name, buffer in self.data_buffers.items():
                 if not buffer:
                     continue
                 
@@ -181,9 +263,9 @@ class MAVLinkStreamer(QObject):
                     continue
                 
                 try:
-                    table = self.create_table_from_messages(msg_type, messages)
+                    table = self.create_table_from_messages(topic_name, messages)
                     if table is not None:
-                        table_name = msg_type.lower()
+                        table_name = topic_name.lower()
                         tables[table_name] = table
                 except Exception:
                     pass
