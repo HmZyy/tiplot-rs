@@ -276,7 +276,7 @@ impl VehicleConfig {
                     y = y.to_radians();
                 }
 
-                glam::Quat::from_euler(glam::EulerRot::XYZ, r, p, y)
+                glam::Quat::from_euler(glam::EulerRot::ZYX, y, p, r)
             }
         }
     }
