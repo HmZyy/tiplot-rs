@@ -7,12 +7,24 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+fn default_point_size() -> f32 {
+    5.0
+}
+
+fn default_line_thickness() -> f32 {
+    1.5
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SerializablePlotTile {
     pub traces: Vec<SerializableTrace>,
     pub show_legend: bool,
     pub show_hover_tooltip: bool,
     pub scatter_mode: bool,
+    #[serde(default = "default_point_size")]
+    pub point_size: f32,
+    #[serde(default = "default_line_thickness")]
+    pub line_thickness: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -141,6 +153,8 @@ impl LayoutData {
                         show_legend: plot_tile.show_legend,
                         show_hover_tooltip: plot_tile.show_hover_tooltip,
                         scatter_mode: plot_tile.scatter_mode,
+                        point_size: plot_tile.point_size,
+                        line_thickness: plot_tile.line_thickness,
                     })
                 }
                 Tile::Container(container) => {
@@ -202,6 +216,8 @@ impl LayoutData {
                 tile.show_legend = plot_tile.show_legend;
                 tile.show_hover_tooltip = plot_tile.show_hover_tooltip;
                 tile.scatter_mode = plot_tile.scatter_mode;
+                tile.point_size = plot_tile.point_size;
+                tile.line_thickness = plot_tile.line_thickness;
 
                 for trace in &plot_tile.traces {
                     tile.add_trace(trace.topic.clone(), trace.col.clone(), trace.color);

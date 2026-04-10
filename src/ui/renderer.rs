@@ -79,7 +79,7 @@ impl PlotRenderer {
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineStrip,
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: None,
@@ -98,13 +98,13 @@ impl PlotRenderer {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: "vs_scatter",
                 buffers: &[],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: "fs_scatter",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -113,7 +113,7 @@ impl PlotRenderer {
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::PointList,
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: None,
@@ -184,6 +184,8 @@ pub struct RealPlotCallback {
     pub bounds: [f32; 4], // [min_time, max_time, min_val, max_val]
     pub color: [f32; 4],  // RGBA
     pub scatter_mode: bool,
+    pub point_size: f32,
+    pub line_thickness: f32,
 }
 
 impl CallbackTrait for RealPlotCallback {
@@ -191,7 +193,7 @@ impl CallbackTrait for RealPlotCallback {
         &self,
         device: &wgpu::Device,
         _queue: &wgpu::Queue,
-        _screen: &eframe::egui_wgpu::ScreenDescriptor,
+        screen: &eframe::egui_wgpu::ScreenDescriptor,
         _encoder: &mut wgpu::CommandEncoder,
         resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
@@ -199,13 +201,23 @@ impl CallbackTrait for RealPlotCallback {
         let key = format!("{}/{}", self.topic, self.col);
 
         if let Some(trace_res) = renderer.buffers.get(&key) {
-            let point_size = 3.0f32;
+            let point_size = self.point_size * screen.pixels_per_point;
+            let line_thickness = self.line_thickness * screen.pixels_per_point;
             let uniforms_data: Vec<f32> = self
                 .bounds
                 .iter()
                 .chain(self.color.iter())
                 .cloned()
-                .chain([point_size, 0.0, 0.0, 0.0].iter().cloned()) // params vec4
+                .chain(
+                    [
+                        point_size,
+                        screen.size_in_pixels[0] as f32,
+                        screen.size_in_pixels[1] as f32,
+                        line_thickness,
+                    ]
+                    .iter()
+                    .cloned(),
+                )
                 .collect();
 
             let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -250,12 +262,13 @@ impl CallbackTrait for RealPlotCallback {
             if let Some(bg) = jobs.pop_front() {
                 if self.scatter_mode {
                     render_pass.set_pipeline(&renderer.point_pipeline);
+                    render_pass.set_bind_group(0, &bg, &[]);
+                    render_pass.draw(0..4, 0..trace_res.count);
                 } else {
                     render_pass.set_pipeline(&renderer.pipeline);
+                    render_pass.set_bind_group(0, &bg, &[]);
+                    render_pass.draw(0..4, 0..trace_res.count.saturating_sub(1));
                 }
-
-                render_pass.set_bind_group(0, &bg, &[]);
-                render_pass.draw(0..trace_res.count, 0..1);
             }
         }
     }

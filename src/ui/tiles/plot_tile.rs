@@ -30,6 +30,8 @@ pub struct PlotTile {
     pub show_hover_tooltip: bool,
     pub show_hover_circles: bool,
     pub scatter_mode: bool,
+    pub point_size: f32,
+    pub line_thickness: f32,
 
     pub cached_tooltip_time: f32,
     pub cached_tooltip_values: Vec<Option<f32>>,
@@ -48,6 +50,8 @@ impl PlotTile {
             show_hover_tooltip: true,
             show_hover_circles: true,
             scatter_mode: false,
+            point_size: 5.0,
+            line_thickness: 1.5,
             cached_tooltip_time: f32::NEG_INFINITY,
             cached_tooltip_values: Vec::new(),
             show_info_window: false,

@@ -304,17 +304,23 @@ impl<'a> Behavior<PlotTile> for TiPlotBehavior<'a> {
         self.draw_grid(ui, rect, min_y, max_y);
 
         for trace in &tile.traces {
-            let cb = eframe::egui_wgpu::Callback::new_paint_callback(
-                rect,
-                RealPlotCallback {
-                    topic: trace.topic.clone(),
-                    col: trace.col.clone(),
-                    bounds: [*self.min_time, *self.max_time, min_y, max_y],
-                    color: trace.color,
-                    scatter_mode: tile.scatter_mode,
-                },
-            );
-            ui.painter().add(cb);
+            if tile.scatter_mode {
+                let cb = eframe::egui_wgpu::Callback::new_paint_callback(
+                    rect,
+                    RealPlotCallback {
+                        topic: trace.topic.clone(),
+                        col: trace.col.clone(),
+                        bounds: [*self.min_time, *self.max_time, min_y, max_y],
+                        color: trace.color,
+                        scatter_mode: tile.scatter_mode,
+                        point_size: tile.point_size,
+                        line_thickness: tile.line_thickness,
+                    },
+                );
+                ui.painter().add(cb);
+            } else {
+                self.draw_trace_line(ui, rect, trace, min_y, max_y, tile.line_thickness);
+            }
         }
 
         if *self.current_time >= *self.min_time && *self.current_time <= *self.max_time {
@@ -353,6 +359,18 @@ impl<'a> Behavior<PlotTile> for TiPlotBehavior<'a> {
                 .max_height(600.0)
                 .show(ui.ctx(), |ui| {
                     ui.label(format!("Total: {} trace(s)", tile.traces.len()));
+                    ui.add_space(8.0);
+                    ui.label("Style");
+                    ui.add(
+                        egui::Slider::new(&mut tile.point_size, 1.0..=16.0)
+                            .text("Point Size")
+                            .clamping(egui::SliderClamping::Always),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut tile.line_thickness, 1.0..=12.0)
+                            .text("Line Thickness")
+                            .clamping(egui::SliderClamping::Always),
+                    );
                     if tile.traces.len() > 0 {
                         ui.separator();
                     }
@@ -428,6 +446,78 @@ impl<'a> Behavior<PlotTile> for TiPlotBehavior<'a> {
 }
 
 impl<'a> TiPlotBehavior<'a> {
+    fn draw_trace_line(
+        &self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        trace: &crate::ui::tiles::plot_tile::TraceConfig,
+        min_y: f32,
+        max_y: f32,
+        line_thickness: f32,
+    ) {
+        let Some(times) = self.data_store.get_column(&trace.topic, "timestamp") else {
+            return;
+        };
+        let Some(values) = self.data_store.get_column(&trace.topic, &trace.col) else {
+            return;
+        };
+        if times.len() < 2 || values.len() < 2 {
+            return;
+        }
+
+        let start_idx = times.partition_point(|&t| t < *self.min_time).saturating_sub(1);
+        let end_idx = times.partition_point(|&t| t <= *self.max_time).min(values.len());
+        if end_idx <= start_idx + 1 {
+            return;
+        }
+
+        let time_span = *self.max_time - *self.min_time;
+        let value_span = max_y - min_y;
+        if time_span <= 0.0 || value_span <= 0.0 || rect.width() <= 0.0 || rect.height() <= 0.0 {
+            return;
+        }
+
+        let mut points = Vec::with_capacity((end_idx - start_idx).min(rect.width() as usize * 2));
+        let mut last_x_bucket: Option<i32> = None;
+
+        for i in start_idx..end_idx {
+            let x_norm = (times[i] - *self.min_time) / time_span;
+            let y_norm = (values[i] - min_y) / value_span;
+            let point = egui::pos2(
+                rect.left() + x_norm * rect.width(),
+                rect.bottom() - y_norm * rect.height(),
+            );
+
+            let x_bucket = point.x.floor() as i32;
+            match last_x_bucket {
+                Some(bucket) if bucket == x_bucket => {
+                    if let Some(last) = points.last_mut() {
+                        *last = point;
+                    }
+                }
+                _ => {
+                    points.push(point);
+                    last_x_bucket = Some(x_bucket);
+                }
+            }
+        }
+
+        if points.len() >= 2 {
+            ui.painter().add(egui::Shape::line(
+                points,
+                egui::Stroke::new(
+                    line_thickness,
+                    egui::Color32::from_rgba_unmultiplied(
+                        (trace.color[0] * 255.0) as u8,
+                        (trace.color[1] * 255.0) as u8,
+                        (trace.color[2] * 255.0) as u8,
+                        (trace.color[3] * 255.0) as u8,
+                    ),
+                ),
+            ));
+        }
+    }
+
     fn estimate_min_sample_interval(&self) -> f32 {
         let mut min_interval = f32::MAX;
 
