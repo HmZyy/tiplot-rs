@@ -1,12 +1,16 @@
 use eframe::egui;
 use eframe::egui_wgpu::{CallbackResources, CallbackTrait};
 use std::collections::{HashMap, VecDeque};
+use std::mem::size_of;
 use std::sync::Mutex;
 use wgpu::util::DeviceExt;
 
 pub struct TraceGpuResource {
     pub buffer: wgpu::Buffer,
+    /// Number of data points currently written (what the shader draws).
     pub count: u32,
+    /// Number of data points the buffer can hold before reallocation.
+    pub capacity: u32,
 }
 
 pub struct PlotRenderer {
@@ -139,35 +143,69 @@ impl PlotRenderer {
     pub fn upload_trace(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         topic: &str,
         col: &str,
         times: &[f32],
         values: &[f32],
     ) {
         let key = format!("{}/{}", topic, col);
+        let new_count = times.len().min(values.len());
 
-        if times.is_empty() || values.is_empty() {
+        if new_count == 0 {
             return;
         }
 
-        // Interleave times and values: [T0, V0, T1, V1, T2, V2, ...]
-        let data: Vec<f32> = times
+        // Fast path: existing buffer has enough capacity — only write the new tail.
+        if let Some(res) = self.buffers.get_mut(&key) {
+            let old_count = res.count as usize;
+
+            if new_count == old_count {
+                return; // nothing new since last upload
+            }
+
+            if (new_count as u32) <= res.capacity {
+                // Interleave only the newly appended points.
+                let new_data: Vec<f32> = times[old_count..new_count]
+                    .iter()
+                    .zip(values[old_count..new_count].iter())
+                    .flat_map(|(t, v)| [*t, *v])
+                    .collect();
+                let byte_offset = (old_count * 2 * size_of::<f32>()) as u64;
+                queue.write_buffer(&res.buffer, byte_offset, bytemuck::cast_slice(&new_data));
+                res.count = new_count as u32;
+                return;
+            }
+            // Capacity exceeded — fall through to full reallocation.
+        }
+
+        // Slow path: allocate a new buffer with 2× headroom to amortise future appends.
+        let capacity = ((new_count * 2) as u32).max(64);
+        let buffer_size = (capacity as usize * 2 * size_of::<f32>()) as u64;
+
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("Trace Buffer: {}", key)),
+            size: buffer_size,
+            // COPY_DST is required for queue.write_buffer on subsequent appends.
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Interleave all current points: [T0, V0, T1, V1, …]
+        let data: Vec<f32> = times[..new_count]
             .iter()
-            .zip(values.iter())
+            .zip(values[..new_count].iter())
             .flat_map(|(t, v)| [*t, *v])
             .collect();
 
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("Trace Buffer: {}", key)),
-            contents: bytemuck::cast_slice(&data),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&data));
 
         self.buffers.insert(
             key,
             TraceGpuResource {
                 buffer,
-                count: times.len() as u32,
+                count: new_count as u32,
+                capacity,
             },
         );
     }

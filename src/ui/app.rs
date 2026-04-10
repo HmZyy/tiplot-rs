@@ -161,6 +161,7 @@ impl TiPlotApp {
             return;
         };
         let device = &wgpu_state.device;
+        let queue = &wgpu_state.queue;
 
         let mut renderer_lock = wgpu_state.renderer.write();
         let Some(renderer) = renderer_lock.callback_resources.get_mut::<PlotRenderer>() else {
@@ -168,13 +169,16 @@ impl TiPlotApp {
             return;
         };
 
+        // Drop all stale GPU buffers — data changed completely (new file loaded).
+        renderer.buffers.clear();
+
         for (topic, cols) in &self.state.data.data_store.topics {
             if let Some(timestamps) = cols.get("timestamp") {
                 for (col_name, values) in cols {
                     if col_name == "timestamp" {
                         continue;
                     }
-                    renderer.upload_trace(device, topic, col_name, timestamps, values);
+                    renderer.upload_trace(device, queue, topic, col_name, timestamps, values);
                 }
             }
         }
@@ -284,6 +288,7 @@ impl TiPlotApp {
             return;
         };
         let device = &wgpu_state.device;
+        let queue = &wgpu_state.queue;
 
         let mut renderer_lock = wgpu_state.renderer.write();
         let Some(renderer) = renderer_lock.callback_resources.get_mut::<PlotRenderer>() else {
@@ -345,7 +350,7 @@ impl TiPlotApp {
                                 if col_name == "timestamp" {
                                     continue;
                                 }
-                                renderer.upload_trace(device, &topic, col_name, timestamps, values);
+                                renderer.upload_trace(device, queue, &topic, col_name, timestamps, values);
                             }
                         }
                     }
