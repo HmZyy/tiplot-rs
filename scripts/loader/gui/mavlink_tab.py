@@ -50,9 +50,12 @@ class MAVLinkTab(QWidget):
     
     def init_ui(self):
         layout = QVBoxLayout()
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(18)
         
         mode_group = QGroupBox("Connection Mode")
         mode_layout = QVBoxLayout()
+        mode_layout.setSpacing(12)
         
         self.mode_group = QButtonGroup()
         self.serial_radio = QRadioButton("Serial")
@@ -79,18 +82,20 @@ class MAVLinkTab(QWidget):
         
         params_group = QGroupBox("Connection Parameters")
         params_layout = QVBoxLayout()
+        params_layout.setSpacing(14)
         
         self.serial_widget = QWidget()
         serial_layout = QVBoxLayout()
         
         device_layout = QHBoxLayout()
+        device_layout.setSpacing(12)
         device_layout.addWidget(QLabel("Device:"))
         self.device_combo = QComboBox()
         self.device_combo.setEditable(True)
         device_layout.addWidget(self.device_combo, 1)
         
-        self.refresh_serial_btn = QPushButton("🔄")
-        self.refresh_serial_btn.setFixedWidth(40)
+        self.refresh_serial_btn = QPushButton("Refresh")
+        self.refresh_serial_btn.setFixedWidth(92)
         self.refresh_serial_btn.setToolTip("Refresh serial ports")
         self.refresh_serial_btn.clicked.connect(self.refresh_serial_ports)
         device_layout.addWidget(self.refresh_serial_btn)
@@ -98,6 +103,7 @@ class MAVLinkTab(QWidget):
         serial_layout.addLayout(device_layout)
         
         baud_layout = QHBoxLayout()
+        baud_layout.setSpacing(12)
         baud_layout.addWidget(QLabel("Baudrate:"))
         self.baud_input = QSpinBox()
         self.baud_input.setRange(9600, 921600)
@@ -112,12 +118,14 @@ class MAVLinkTab(QWidget):
         tcp_layout = QVBoxLayout()
         
         tcp_addr_layout = QHBoxLayout()
+        tcp_addr_layout.setSpacing(12)
         tcp_addr_layout.addWidget(QLabel("Address:"))
         self.tcp_addr_input = QLineEdit("0.0.0.0")
         tcp_addr_layout.addWidget(self.tcp_addr_input)
         tcp_layout.addLayout(tcp_addr_layout)
         
         tcp_port_layout = QHBoxLayout()
+        tcp_port_layout.setSpacing(12)
         tcp_port_layout.addWidget(QLabel("Port:"))
         self.tcp_port_input = QSpinBox()
         self.tcp_port_input.setRange(1, 65535)
@@ -133,12 +141,14 @@ class MAVLinkTab(QWidget):
         udp_layout = QVBoxLayout()
         
         udp_addr_layout = QHBoxLayout()
+        udp_addr_layout.setSpacing(12)
         udp_addr_layout.addWidget(QLabel("Address:"))
         self.udp_addr_input = QLineEdit("127.0.0.1")
         udp_addr_layout.addWidget(self.udp_addr_input)
         udp_layout.addLayout(udp_addr_layout)
         
         udp_port_layout = QHBoxLayout()
+        udp_port_layout.setSpacing(12)
         udp_port_layout.addWidget(QLabel("Port:"))
         self.udp_port_input = QSpinBox()
         self.udp_port_input.setRange(1, 65535)
@@ -154,8 +164,14 @@ class MAVLinkTab(QWidget):
         file_layout = QVBoxLayout()
         
         file_select_layout = QHBoxLayout()
+        file_select_layout.setSpacing(12)
         self.file_label = QLabel("No file selected")
-        self.file_label.setStyleSheet("color: #94a3b8;")
+        self.file_label.setWordWrap(True)
+        self.file_label.setMinimumHeight(44)
+        self.file_label.setStyleSheet(
+            "background-color: #09111d; border: 1px solid #1d2f47; border-radius: 12px; "
+            "color: #9eb6cf; padding: 10px 12px;"
+        )
         file_select_layout.addWidget(self.file_label, 1)
         
         self.file_browse_btn = QPushButton("Browse...")
@@ -172,8 +188,10 @@ class MAVLinkTab(QWidget):
         
         stream_group = QGroupBox("Streaming Settings")
         stream_layout = QVBoxLayout()
+        stream_layout.setSpacing(12)
         
         rate_layout = QHBoxLayout()
+        rate_layout.setSpacing(12)
         rate_layout.addWidget(QLabel("Update Rate (Hz):"))
         self.rate_input = QDoubleSpinBox()
         self.rate_input.setRange(0.1, 100.0)
@@ -186,6 +204,7 @@ class MAVLinkTab(QWidget):
         layout.addWidget(stream_group)
         
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(12)
         
         self.start_btn = QPushButton("Start Streaming")
         self.start_btn.clicked.connect(self.start_streaming)
@@ -230,6 +249,7 @@ class MAVLinkTab(QWidget):
         
         self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
+        self.output_text.setPlaceholderText("Streaming status and receiver output will appear here.")
         layout.addWidget(self.output_text)
         
         self.setLayout(layout)
@@ -294,7 +314,7 @@ class MAVLinkTab(QWidget):
         last_file = self.settings.value("last_file", "")
         if last_file and os.path.exists(last_file):
             self.mavlink_file = last_file
-            self.file_label.setText(os.path.basename(last_file))
+            self.file_label.setText(last_file)
         
         # Load streaming settings
         self.rate_input.setValue(float(self.settings.value("rate", 10.0)))
@@ -350,7 +370,7 @@ class MAVLinkTab(QWidget):
         )
         
         if file_path:
-            self.file_label.setText(os.path.basename(file_path))
+            self.file_label.setText(file_path)
             self.mavlink_file = file_path
             self.last_directory = str(Path(file_path).parent)
     

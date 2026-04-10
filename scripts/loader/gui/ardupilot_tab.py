@@ -23,13 +23,22 @@ class ArduPilotTab(QWidget):
     
     def init_ui(self):
         layout = QVBoxLayout()
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(18)
         
         file_group = QGroupBox("ArduPilot .BIN File")
         file_layout = QVBoxLayout()
+        file_layout.setSpacing(14)
         
         file_select_layout = QHBoxLayout()
+        file_select_layout.setSpacing(12)
         self.file_label = QLabel("No file selected")
-        self.file_label.setStyleSheet("color: #94a3b8; padding: 8px;")
+        self.file_label.setWordWrap(True)
+        self.file_label.setMinimumHeight(44)
+        self.file_label.setStyleSheet(
+            "background-color: #09111d; border: 1px solid #1d2f47; border-radius: 12px; "
+            "color: #9eb6cf; padding: 10px 12px;"
+        )
         file_select_layout.addWidget(self.file_label, 1)
         
         self.browse_btn = QPushButton("Browse...")
@@ -52,6 +61,7 @@ class ArduPilotTab(QWidget):
         
         self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
+        self.output_text.setPlaceholderText("Parse and transfer output will appear here.")
         layout.addWidget(self.output_text)
         
         self.setLayout(layout)
@@ -68,7 +78,7 @@ class ArduPilotTab(QWidget):
         last_file = self.settings.value("last_file", "")
         if last_file and os.path.exists(last_file):
             self.bin_file = last_file
-            self.file_label.setText(os.path.basename(last_file))
+            self.file_label.setText(last_file)
             self.send_btn.setEnabled(True)
         
         self.settings.endGroup()
@@ -95,7 +105,7 @@ class ArduPilotTab(QWidget):
         if file_path:
             self.bin_file = file_path
             self.last_directory = str(Path(file_path).parent)
-            self.file_label.setText(os.path.basename(file_path))
+            self.file_label.setText(file_path)
             self.send_btn.setEnabled(True)
             self.log_output(f"Selected: {file_path}")
     

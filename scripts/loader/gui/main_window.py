@@ -1,7 +1,14 @@
-import os
 from pathlib import Path
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QTabWidget, QScrollArea
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QMainWindow,
+    QScrollArea,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 from PyQt6.QtCore import QSettings, Qt
+from gui.modern_tab_bar import ModernTabBar
 from gui.ulg_tab import ULGTab
 from gui.ardupilot_tab import ArduPilotTab
 from gui.mavlink_tab import MAVLinkTab
@@ -25,21 +32,28 @@ class MainWindow(QMainWindow):
     
     def init_ui(self):
         self.setWindowTitle("TiPlot Loader")
-        self.setGeometry(100, 100, 800, 700)
+        self.setGeometry(100, 100, 1120, 820)
+        self.setMinimumSize(980, 720)
+        self.setFont(QFont("DejaVu Sans", 10))
         
         central_widget = QWidget()
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setContentsMargins(24, 24, 24, 24)
+        main_layout.setSpacing(18)
         
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
         
         content_widget = QWidget()
         content_layout = QVBoxLayout()
+        content_layout.setContentsMargins(0, 0, 0, 0)
         
         self.tabs = QTabWidget()
+        self.tabs.setTabBar(ModernTabBar())
+        self.tabs.setDocumentMode(True)
         self.receiver_tab = ReceiverTab(self.settings)
         self.ulg_tab = ULGTab(self.settings, self.receiver_tab)
         self.ardupilot_tab = ArduPilotTab(self.settings, self.receiver_tab)
@@ -61,113 +75,133 @@ class MainWindow(QMainWindow):
         
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #1e293b;
+                background-color: #07111f;
             }
             QWidget {
-                background-color: #1e293b;
-                color: #e2e8f0;
+                background-color: #07111f;
+                color: #e6eef8;
+                selection-background-color: #1d4ed8;
+                selection-color: #f8fbff;
             }
             QScrollArea {
                 border: none;
-                background-color: #1e293b;
+                background: transparent;
             }
             QGroupBox {
-                border: 1px solid #475569;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
-                font-weight: bold;
+                background-color: #0d1728;
+                border: 1px solid #1d2f47;
+                border-radius: 16px;
+                margin-top: 18px;
+                padding: 18px 16px 16px 16px;
+                font-weight: 600;
+                font-size: 12px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
+                left: 14px;
+                padding: 0 8px;
+                color: #dbe8f5;
             }
             QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
-                background-color: #334155;
-                border: 1px solid #475569;
-                border-radius: 3px;
-                padding: 5px;
-                color: #e2e8f0;
+                min-height: 38px;
+                background-color: #0a1422;
+                border: 1px solid #233750;
+                border-radius: 10px;
+                padding: 6px 10px;
+                color: #e6eef8;
+            }
+            QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+                border: 1px solid #2f81f7;
             }
             QComboBox::drop-down {
                 border: none;
+                width: 28px;
             }
             QComboBox::down-arrow {
                 image: none;
                 border-left: 5px solid transparent;
                 border-right: 5px solid transparent;
-                border-top: 5px solid #e2e8f0;
+                border-top: 5px solid #9eb6cf;
                 margin-right: 5px;
             }
             QTextEdit {
-                background-color: #0f172a;
-                border: 1px solid #475569;
-                border-radius: 3px;
-                color: #e2e8f0;
-                font-family: monospace;
+                background-color: #09111d;
+                border: 1px solid #1d2f47;
+                border-radius: 16px;
+                color: #d7e3f0;
+                font-family: "DejaVu Sans Mono";
+                font-size: 12px;
+                padding: 10px;
             }
             QPushButton {
-                background-color: #475569;
+                min-height: 40px;
+                background-color: #15263d;
                 color: white;
-                border: none;
-                border-radius: 3px;
+                border: 1px solid #26486e;
+                border-radius: 12px;
                 padding: 8px 16px;
+                font-weight: 600;
             }
             QPushButton:hover {
-                background-color: #64748b;
+                background-color: #1c3452;
+                border-color: #3d6ea6;
             }
             QTabWidget::pane {
-                border: 1px solid #475569;
-                background-color: #1e293b;
+                border: none;
+                border-radius: 18px;
+                background: transparent;
+                margin-top: 4px;
             }
-            QTabBar::tab {
-                background-color: #334155;
-                color: #94a3b8;
-                padding: 10px 20px;
-                border-top-left-radius: 5px;
-                border-top-right-radius: 5px;
-            }
-            QTabBar::tab:selected {
-                background-color: #1e293b;
-                color: #3b82f6;
-                border-bottom: 2px solid #3b82f6;
+            QTabBar::base {
+                border: none;
+                background: transparent;
             }
             QRadioButton {
-                spacing: 5px;
+                spacing: 8px;
+                color: #cbd8e6;
             }
             QRadioButton::indicator {
-                width: 15px;
-                height: 15px;
+                width: 16px;
+                height: 16px;
+            }
+            QRadioButton::indicator::unchecked {
+                border: 1px solid #466482;
+                border-radius: 8px;
+                background: #0a1422;
+            }
+            QRadioButton::indicator::checked {
+                border: 1px solid #2f81f7;
+                border-radius: 8px;
+                background: #2f81f7;
             }
             QScrollBar:vertical {
-                background-color: #1e293b;
+                background-color: #08111d;
                 width: 12px;
                 border-radius: 6px;
             }
             QScrollBar::handle:vertical {
-                background-color: #475569;
+                background-color: #29425f;
                 border-radius: 6px;
                 min-height: 20px;
             }
             QScrollBar::handle:vertical:hover {
-                background-color: #64748b;
+                background-color: #3e648e;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
             }
             QScrollBar:horizontal {
-                background-color: #1e293b;
+                background-color: #08111d;
                 height: 12px;
                 border-radius: 6px;
             }
             QScrollBar::handle:horizontal {
-                background-color: #475569;
+                background-color: #29425f;
                 border-radius: 6px;
                 min-width: 20px;
             }
             QScrollBar::handle:horizontal:hover {
-                background-color: #64748b;
+                background-color: #3e648e;
             }
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                 width: 0px;

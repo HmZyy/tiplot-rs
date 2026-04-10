@@ -13,17 +13,22 @@ class ReceiverTab(QWidget):
     
     def init_ui(self):
         layout = QVBoxLayout()
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(18)
         
         receiver_group = QGroupBox("Receiver Settings")
         receiver_layout = QVBoxLayout()
+        receiver_layout.setSpacing(14)
         
         host_layout = QHBoxLayout()
+        host_layout.setSpacing(12)
         host_layout.addWidget(QLabel("Host:"))
         self.host_input = QLineEdit("127.0.0.1")
         host_layout.addWidget(self.host_input)
         receiver_layout.addLayout(host_layout)
         
         port_layout = QHBoxLayout()
+        port_layout.setSpacing(12)
         port_layout.addWidget(QLabel("Port:"))
         self.port_input = QSpinBox()
         self.port_input.setRange(1, 65535)
@@ -38,7 +43,7 @@ class ReceiverTab(QWidget):
             "These settings are shared across all sender tabs.\n"
             "Configure the host and port where TiPlot is listening for incoming data."
         )
-        info_label.setStyleSheet("color: #94a3b8; padding: 10px;")
+        info_label.setStyleSheet("color: #7f97af; padding: 2px 6px;")
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
         
