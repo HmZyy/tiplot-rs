@@ -8,7 +8,7 @@ use crate::ui::panels::{
 };
 use crate::ui::renderer::PlotRenderer;
 use crate::ui::tiles::TiPlotBehavior;
-use crossbeam_channel::unbounded;
+use crossbeam_channel::bounded;
 use eframe::egui;
 use egui_phosphor::regular as icons;
 use std::path::PathBuf;
@@ -34,7 +34,7 @@ impl TiPlotApp {
                 .insert(renderer);
         }
 
-        let (tx, rx) = unbounded();
+        let (tx, rx) = bounded(1000);
         start_tcp_server(tx, cc.egui_ctx.clone());
 
         let mut model_cache = ModelCache::new();
@@ -181,9 +181,9 @@ impl TiPlotApp {
 
         for (_topic, cols) in &self.state.data.data_store.topics {
             if let Some(timestamps) = cols.get("timestamp") {
-                if !timestamps.is_empty() {
-                    min_time = min_time.min(timestamps[0]);
-                    max_time = max_time.max(timestamps[timestamps.len() - 1]);
+                if let (Some(&first), Some(&last)) = (timestamps.first(), timestamps.last()) {
+                    min_time = min_time.min(first);
+                    max_time = max_time.max(last);
                 }
             }
         }

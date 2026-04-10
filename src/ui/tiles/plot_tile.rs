@@ -64,10 +64,6 @@ impl PlotTile {
         self.traces.push(TraceConfig { topic, col, color });
     }
 
-    pub fn _is_empty(&self) -> bool {
-        self.traces.is_empty()
-    }
-
     pub fn trace_count(&self) -> usize {
         self.traces.len()
     }

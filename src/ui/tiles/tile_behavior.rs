@@ -303,6 +303,25 @@ impl<'a> Behavior<PlotTile> for TiPlotBehavior<'a> {
 
         self.draw_grid(ui, rect, min_y, max_y);
 
+        // Show a placeholder when traces are configured but no data has arrived yet.
+        if !tile.traces.is_empty() {
+            let any_data = tile.traces.iter().any(|trace| {
+                self.data_store
+                    .get_column(&trace.topic, "timestamp")
+                    .map(|t| !t.is_empty())
+                    .unwrap_or(false)
+            });
+            if !any_data {
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "Waiting for data...",
+                    egui::FontId::proportional(14.0),
+                    egui::Color32::from_gray(100),
+                );
+            }
+        }
+
         for trace in &tile.traces {
             if tile.scatter_mode {
                 let cb = eframe::egui_wgpu::Callback::new_paint_callback(

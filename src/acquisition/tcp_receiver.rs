@@ -72,9 +72,12 @@ async fn handle_connection(
     let metadata: PacketMetadata = serde_json::from_slice(&meta_json)?;
     println!("Received metadata: {} tables", metadata.table_count);
 
-    sender
-        .send(DataMessage::Metadata(metadata.timeline_range))
-        .ok();
+    if sender
+        .try_send(DataMessage::Metadata(metadata.timeline_range))
+        .is_err()
+    {
+        eprintln!("[warn] data channel full, dropping metadata");
+    }
 
     ctx.request_repaint();
 
@@ -99,10 +102,15 @@ async fn handle_connection(
                 for batch_result in reader {
                     match batch_result {
                         Ok(batch) => {
-                            sender
-                                .send(DataMessage::NewBatch(table_name.clone(), batch))
-                                .ok();
-
+                            if sender
+                                .try_send(DataMessage::NewBatch(table_name.clone(), batch))
+                                .is_err()
+                            {
+                                eprintln!(
+                                    "[warn] data channel full, dropping batch for '{}'",
+                                    table_name
+                                );
+                            }
                             ctx.request_repaint();
                         }
                         Err(e) => {
