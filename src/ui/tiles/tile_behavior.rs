@@ -470,7 +470,9 @@ impl<'a> TiPlotBehavior<'a> {
             .partition_point(|&t| t < *self.min_time)
             .saturating_sub(1)
             .min(sample_count);
-        let end_idx = times.partition_point(|&t| t <= *self.max_time).min(sample_count);
+        let end_idx = times
+            .partition_point(|&t| t <= *self.max_time)
+            .min(sample_count);
         // Include the first sample beyond the viewport so the last visible segment
         // still reaches the clip edge when the next point is off-screen.
         let render_end_idx = if end_idx < sample_count {
@@ -488,9 +490,48 @@ impl<'a> TiPlotBehavior<'a> {
             return;
         }
 
+        #[derive(Clone, Copy)]
+        struct BucketSample {
+            index: usize,
+            point: egui::Pos2,
+        }
+
+        fn push_unique_point(points: &mut Vec<egui::Pos2>, point: egui::Pos2) {
+            let should_push = points
+                .last()
+                .map(|last| last.distance_sq(point) > f32::EPSILON)
+                .unwrap_or(true);
+            if should_push {
+                points.push(point);
+            }
+        }
+
+        fn flush_bucket(
+            points: &mut Vec<egui::Pos2>,
+            first: Option<BucketSample>,
+            min_sample: Option<BucketSample>,
+            max_sample: Option<BucketSample>,
+            last: Option<BucketSample>,
+        ) {
+            let mut samples = [first, min_sample, max_sample, last]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+            samples.sort_by_key(|sample| sample.index);
+            samples.dedup_by_key(|sample| sample.index);
+
+            for sample in samples {
+                push_unique_point(points, sample.point);
+            }
+        }
+
         let mut points =
-            Vec::with_capacity((render_end_idx - start_idx).min(rect.width() as usize * 2));
-        let mut last_x_bucket: Option<i32> = None;
+            Vec::with_capacity((render_end_idx - start_idx).min(rect.width() as usize * 4));
+        let mut current_bucket: Option<i32> = None;
+        let mut bucket_first: Option<BucketSample> = None;
+        let mut bucket_min: Option<BucketSample> = None;
+        let mut bucket_max: Option<BucketSample> = None;
+        let mut bucket_last: Option<BucketSample> = None;
 
         for i in start_idx..render_end_idx {
             let x_norm = (times[i] - *self.min_time) / time_span;
@@ -499,20 +540,52 @@ impl<'a> TiPlotBehavior<'a> {
                 rect.left() + x_norm * rect.width(),
                 rect.bottom() - y_norm * rect.height(),
             );
+            let sample = BucketSample { index: i, point };
 
             let x_bucket = point.x.floor() as i32;
-            match last_x_bucket {
+            match current_bucket {
                 Some(bucket) if bucket == x_bucket => {
-                    if let Some(last) = points.last_mut() {
-                        *last = point;
+                    if bucket_first.is_none() {
+                        bucket_first = Some(sample);
                     }
+                    if bucket_min
+                        .map(|min_sample| point.y > min_sample.point.y)
+                        .unwrap_or(true)
+                    {
+                        bucket_min = Some(sample);
+                    }
+                    if bucket_max
+                        .map(|max_sample| point.y < max_sample.point.y)
+                        .unwrap_or(true)
+                    {
+                        bucket_max = Some(sample);
+                    }
+                    bucket_last = Some(sample);
                 }
                 _ => {
-                    points.push(point);
-                    last_x_bucket = Some(x_bucket);
+                    flush_bucket(
+                        &mut points,
+                        bucket_first,
+                        bucket_min,
+                        bucket_max,
+                        bucket_last,
+                    );
+                    current_bucket = Some(x_bucket);
+                    bucket_first = Some(sample);
+                    bucket_min = Some(sample);
+                    bucket_max = Some(sample);
+                    bucket_last = Some(sample);
                 }
             }
         }
+
+        flush_bucket(
+            &mut points,
+            bucket_first,
+            bucket_min,
+            bucket_max,
+            bucket_last,
+        );
 
         if points.len() >= 2 {
             ui.painter().add(egui::Shape::line(
