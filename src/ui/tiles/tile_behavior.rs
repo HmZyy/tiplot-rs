@@ -323,23 +323,20 @@ impl<'a> Behavior<PlotTile> for TiPlotBehavior<'a> {
         }
 
         for trace in &tile.traces {
-            if tile.scatter_mode {
-                let cb = eframe::egui_wgpu::Callback::new_paint_callback(
+            let cb = eframe::egui_wgpu::Callback::new_paint_callback(
+                rect,
+                RealPlotCallback {
+                    topic: trace.topic.clone(),
+                    col: trace.col.clone(),
+                    bounds: [*self.min_time, *self.max_time, min_y, max_y],
+                    color: trace.color,
+                    scatter_mode: tile.scatter_mode,
+                    point_size: tile.point_size,
+                    line_thickness: tile.line_thickness,
                     rect,
-                    RealPlotCallback {
-                        topic: trace.topic.clone(),
-                        col: trace.col.clone(),
-                        bounds: [*self.min_time, *self.max_time, min_y, max_y],
-                        color: trace.color,
-                        scatter_mode: tile.scatter_mode,
-                        point_size: tile.point_size,
-                        line_thickness: tile.line_thickness,
-                    },
-                );
-                ui.painter().add(cb);
-            } else {
-                self.draw_trace_line(ui, rect, trace, min_y, max_y, tile.line_thickness);
-            }
+                },
+            );
+            ui.painter().add(cb);
         }
 
         if *self.current_time >= *self.min_time && *self.current_time <= *self.max_time {
@@ -465,162 +462,6 @@ impl<'a> Behavior<PlotTile> for TiPlotBehavior<'a> {
 }
 
 impl<'a> TiPlotBehavior<'a> {
-    fn draw_trace_line(
-        &self,
-        ui: &mut egui::Ui,
-        rect: egui::Rect,
-        trace: &crate::ui::tiles::plot_tile::TraceConfig,
-        min_y: f32,
-        max_y: f32,
-        line_thickness: f32,
-    ) {
-        let Some(times) = self.data_store.get_column(&trace.topic, "timestamp") else {
-            return;
-        };
-        let Some(values) = self.data_store.get_column(&trace.topic, &trace.col) else {
-            return;
-        };
-        if times.len() < 2 || values.len() < 2 {
-            return;
-        }
-
-        let sample_count = times.len().min(values.len());
-        let start_idx = times
-            .partition_point(|&t| t < *self.min_time)
-            .saturating_sub(1)
-            .min(sample_count);
-        let end_idx = times
-            .partition_point(|&t| t <= *self.max_time)
-            .min(sample_count);
-        // Include the first sample beyond the viewport so the last visible segment
-        // still reaches the clip edge when the next point is off-screen.
-        let render_end_idx = if end_idx < sample_count {
-            end_idx + 1
-        } else {
-            end_idx
-        };
-        if render_end_idx <= start_idx + 1 {
-            return;
-        }
-
-        let time_span = *self.max_time - *self.min_time;
-        let value_span = max_y - min_y;
-        if time_span <= 0.0 || value_span <= 0.0 || rect.width() <= 0.0 || rect.height() <= 0.0 {
-            return;
-        }
-
-        #[derive(Clone, Copy)]
-        struct BucketSample {
-            index: usize,
-            point: egui::Pos2,
-        }
-
-        fn push_unique_point(points: &mut Vec<egui::Pos2>, point: egui::Pos2) {
-            let should_push = points
-                .last()
-                .map(|last| last.distance_sq(point) > f32::EPSILON)
-                .unwrap_or(true);
-            if should_push {
-                points.push(point);
-            }
-        }
-
-        fn flush_bucket(
-            points: &mut Vec<egui::Pos2>,
-            first: Option<BucketSample>,
-            min_sample: Option<BucketSample>,
-            max_sample: Option<BucketSample>,
-            last: Option<BucketSample>,
-        ) {
-            let mut samples = [first, min_sample, max_sample, last]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-            samples.sort_by_key(|sample| sample.index);
-            samples.dedup_by_key(|sample| sample.index);
-
-            for sample in samples {
-                push_unique_point(points, sample.point);
-            }
-        }
-
-        let mut points =
-            Vec::with_capacity((render_end_idx - start_idx).min(rect.width() as usize * 4));
-        let mut current_bucket: Option<i32> = None;
-        let mut bucket_first: Option<BucketSample> = None;
-        let mut bucket_min: Option<BucketSample> = None;
-        let mut bucket_max: Option<BucketSample> = None;
-        let mut bucket_last: Option<BucketSample> = None;
-
-        for i in start_idx..render_end_idx {
-            let x_norm = (times[i] - *self.min_time) / time_span;
-            let y_norm = (values[i] - min_y) / value_span;
-            let point = egui::pos2(
-                rect.left() + x_norm * rect.width(),
-                rect.bottom() - y_norm * rect.height(),
-            );
-            let sample = BucketSample { index: i, point };
-
-            let x_bucket = point.x.floor() as i32;
-            match current_bucket {
-                Some(bucket) if bucket == x_bucket => {
-                    if bucket_first.is_none() {
-                        bucket_first = Some(sample);
-                    }
-                    if bucket_min
-                        .map(|min_sample| point.y > min_sample.point.y)
-                        .unwrap_or(true)
-                    {
-                        bucket_min = Some(sample);
-                    }
-                    if bucket_max
-                        .map(|max_sample| point.y < max_sample.point.y)
-                        .unwrap_or(true)
-                    {
-                        bucket_max = Some(sample);
-                    }
-                    bucket_last = Some(sample);
-                }
-                _ => {
-                    flush_bucket(
-                        &mut points,
-                        bucket_first,
-                        bucket_min,
-                        bucket_max,
-                        bucket_last,
-                    );
-                    current_bucket = Some(x_bucket);
-                    bucket_first = Some(sample);
-                    bucket_min = Some(sample);
-                    bucket_max = Some(sample);
-                    bucket_last = Some(sample);
-                }
-            }
-        }
-
-        flush_bucket(
-            &mut points,
-            bucket_first,
-            bucket_min,
-            bucket_max,
-            bucket_last,
-        );
-
-        if points.len() >= 2 {
-            ui.painter().add(egui::Shape::line(
-                points,
-                egui::Stroke::new(
-                    line_thickness,
-                    egui::Color32::from_rgba_unmultiplied(
-                        (trace.color[0] * 255.0) as u8,
-                        (trace.color[1] * 255.0) as u8,
-                        (trace.color[2] * 255.0) as u8,
-                        (trace.color[3] * 255.0) as u8,
-                    ),
-                ),
-            ));
-        }
-    }
 
     fn estimate_min_sample_interval(&self) -> f32 {
         let mut min_interval = f32::MAX;

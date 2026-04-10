@@ -14,8 +14,8 @@ pub struct TraceGpuResource {
 }
 
 pub struct PlotRenderer {
-    pub pipeline: wgpu::RenderPipeline,
     pub point_pipeline: wgpu::RenderPipeline,
+    pub miter_pipeline: wgpu::RenderPipeline,
 
     pub bind_group_layout: wgpu::BindGroupLayout,
 
@@ -63,40 +63,6 @@ impl PlotRenderer {
             push_constant_ranges: &[],
         });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Plot Line Render Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
-
         let point_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Plot Point Render Pipeline"),
             layout: Some(&pipeline_layout),
@@ -131,9 +97,43 @@ impl PlotRenderer {
             cache: None,
         });
 
+        let miter_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Plot Miter Line Render Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_miter",
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         Self {
-            pipeline,
             point_pipeline,
+            miter_pipeline,
             bind_group_layout,
             buffers: HashMap::new(),
             paint_jobs: Mutex::new(VecDeque::new()),
@@ -224,6 +224,10 @@ pub struct RealPlotCallback {
     pub scatter_mode: bool,
     pub point_size: f32,
     pub line_thickness: f32,
+    /// The tile rect in logical points — used to compute the correct
+    /// pixel dimensions for the shader (egui-wgpu sets the wgpu viewport
+    /// to this rect, so clip space maps to the tile, not the full screen).
+    pub rect: egui::Rect,
 }
 
 impl CallbackTrait for RealPlotCallback {
@@ -241,23 +245,27 @@ impl CallbackTrait for RealPlotCallback {
         let key = format!("{}/{}", self.topic, self.col);
 
         if let Some(trace_res) = renderer.buffers.get(&key) {
-            let point_size = self.point_size * screen.pixels_per_point;
-            let line_thickness = self.line_thickness * screen.pixels_per_point;
+            let ppp = screen.pixels_per_point;
+            let line_thickness = self.line_thickness * ppp;
+            // egui-wgpu sets the wgpu viewport to the callback rect, so clip space
+            // [-1,1] maps to the tile — use tile pixel dimensions for the shader's
+            // pixel-to-clip-space conversion, not the full screen dimensions.
+            let tile_w = (self.rect.width() * ppp).max(1.0);
+            let tile_h = (self.rect.height() * ppp).max(1.0);
+            // params.x serves dual purpose:
+            //   scatter mode → point_size_px (circle radius input)
+            //   line mode    → total point count (for miter bounds-checking)
+            let params_x = if self.scatter_mode {
+                self.point_size * ppp
+            } else {
+                trace_res.count as f32
+            };
             let uniforms_data: Vec<f32> = self
                 .bounds
                 .iter()
                 .chain(self.color.iter())
                 .cloned()
-                .chain(
-                    [
-                        point_size,
-                        screen.size_in_pixels[0] as f32,
-                        screen.size_in_pixels[1] as f32,
-                        line_thickness,
-                    ]
-                    .iter()
-                    .cloned(),
-                )
+                .chain([params_x, tile_w, tile_h, line_thickness].iter().cloned())
                 .collect();
 
             let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -318,7 +326,9 @@ impl CallbackTrait for RealPlotCallback {
                     render_pass.set_bind_group(0, &bg, &[]);
                     render_pass.draw(0..4, 0..trace_res.count);
                 } else {
-                    render_pass.set_pipeline(&renderer.pipeline);
+                    // Miter-join thick polyline: each instance draws the quad for
+                    // segment [i, i+1] and reads neighbours for gapless joins.
+                    render_pass.set_pipeline(&renderer.miter_pipeline);
                     render_pass.set_bind_group(0, &bg, &[]);
                     render_pass.draw(0..4, 0..trace_res.count.saturating_sub(1));
                 }
