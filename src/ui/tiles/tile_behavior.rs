@@ -660,11 +660,11 @@ impl<'a> TiPlotBehavior<'a> {
                     continue;
                 }
 
-                let start_idx = times.partition_point(|&t| t < *self.min_time);
-                let end_idx = times.partition_point(|&t| t <= *self.max_time);
+                let sample_count = times.len().min(vals.len());
+                let inner_start = times.partition_point(|&t| t < *self.min_time);
+                let inner_end = times.partition_point(|&t| t <= *self.max_time).min(sample_count);
 
-                for i in start_idx..end_idx.min(vals.len()) {
-                    let v = vals[i];
+                let mut include = |v: f32| {
                     if v < min_y {
                         min_y = v;
                     }
@@ -672,6 +672,39 @@ impl<'a> TiPlotBehavior<'a> {
                         max_y = v;
                     }
                     has_data = true;
+                };
+
+                // If a line segment crosses the left viewport edge, compute the
+                // interpolated y at min_time so the axis accounts for it.
+                if inner_start > 0 && inner_start < sample_count {
+                    let t0 = times[inner_start - 1];
+                    let t1 = times[inner_start];
+                    let span = t1 - t0;
+                    if span.abs() > 1e-9 {
+                        let v0 = vals[inner_start - 1];
+                        let v1 = vals[inner_start];
+                        let t = (*self.min_time - t0) / span;
+                        include(v0 + t * (v1 - v0));
+                    }
+                }
+
+                // Scan every point fully inside the viewport.
+                for i in inner_start..inner_end {
+                    include(vals[i]);
+                }
+
+                // If a line segment crosses the right viewport edge, compute the
+                // interpolated y at max_time.
+                if inner_end > 0 && inner_end < sample_count {
+                    let t0 = times[inner_end - 1];
+                    let t1 = times[inner_end];
+                    let span = t1 - t0;
+                    if span.abs() > 1e-9 {
+                        let v0 = vals[inner_end - 1];
+                        let v1 = vals[inner_end];
+                        let t = (*self.max_time - t0) / span;
+                        include(v0 + t * (v1 - v0));
+                    }
                 }
             }
         }

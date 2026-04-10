@@ -62,6 +62,8 @@ impl PlotTile {
 
     pub fn add_trace(&mut self, topic: String, col: String, color: [f32; 4]) {
         self.traces.push(TraceConfig { topic, col, color });
+        // Invalidate cache so the new trace is included on the next tooltip update.
+        self.cached_tooltip_time = f32::NEG_INFINITY;
     }
 
     pub fn trace_count(&self) -> usize {
