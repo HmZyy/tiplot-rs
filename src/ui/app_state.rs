@@ -7,6 +7,10 @@ use crate::ui::tiles::{InterpolationMode, PlotTile};
 use crossbeam_channel::Receiver;
 use egui_tiles::{LinearDir, TileId, Tiles, Tree};
 use std::path::PathBuf;
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc,
+};
 
 pub struct TimelineState {
     pub min_time: f32,
@@ -120,17 +124,27 @@ pub struct DataState {
     pub receiving_data: bool,
     pub last_data_time: Option<std::time::Instant>,
     pub data_file_path: Option<PathBuf>,
+    /// Number of messages dropped because the ingest channel was full.
+    pub dropped_messages: Arc<AtomicU32>,
 }
 
 impl DataState {
-    pub fn new(rx: Receiver<crate::acquisition::DataMessage>) -> Self {
+    pub fn new(
+        rx: Receiver<crate::acquisition::DataMessage>,
+        dropped_messages: Arc<AtomicU32>,
+    ) -> Self {
         Self {
             data_store: DataStore::new(),
             rx,
             receiving_data: false,
             last_data_time: None,
             data_file_path: None,
+            dropped_messages,
         }
+    }
+
+    pub fn dropped_count(&self) -> u32 {
+        self.dropped_messages.load(Ordering::Relaxed)
     }
 
     pub fn clear(&mut self) {
@@ -384,6 +398,8 @@ pub struct UIState {
     pub layouts_dir: PathBuf,
     pub frame_times: std::collections::VecDeque<std::time::Instant>,
     pub current_fps: f32,
+    /// Last TCP-level error received from the ingest task, shown in the status bar.
+    pub tcp_error: Option<String>,
 }
 
 impl UIState {
@@ -393,6 +409,7 @@ impl UIState {
             layouts_dir,
             frame_times: std::collections::VecDeque::with_capacity(60),
             current_fps: 0.0,
+            tcp_error: None,
         }
     }
 
@@ -427,11 +444,12 @@ impl AppState {
         rx: Receiver<crate::acquisition::DataMessage>,
         layouts_dir: PathBuf,
         model_cache: ModelCache,
+        dropped_messages: Arc<AtomicU32>,
     ) -> Self {
         Self {
             timeline: TimelineState::new(),
             panels: PanelState::new(),
-            data: DataState::new(rx),
+            data: DataState::new(rx, dropped_messages),
             layout: LayoutState::new(),
             ui: UIState::new(layouts_dir),
             model_cache,

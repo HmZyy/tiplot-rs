@@ -12,6 +12,7 @@ use crossbeam_channel::bounded;
 use eframe::egui;
 use egui_phosphor::regular as icons;
 use std::path::PathBuf;
+use std::sync::{atomic::AtomicU32, Arc};
 
 pub struct TiPlotApp {
     state: AppState,
@@ -35,7 +36,8 @@ impl TiPlotApp {
         }
 
         let (tx, rx) = bounded(1000);
-        start_tcp_server(tx, cc.egui_ctx.clone());
+        let dropped = Arc::new(AtomicU32::new(0));
+        start_tcp_server(tx, cc.egui_ctx.clone(), Arc::clone(&dropped));
 
         let mut model_cache = ModelCache::new();
 
@@ -66,7 +68,7 @@ impl TiPlotApp {
         };
 
         Self {
-            state: AppState::new(rx, layouts_dir, model_cache),
+            state: AppState::new(rx, layouts_dir, model_cache, dropped),
         }
     }
 
@@ -154,14 +156,17 @@ impl TiPlotApp {
     }
 
     fn reupload_all_traces(&mut self, frame: &mut eframe::Frame) {
-        let wgpu_state = frame.wgpu_render_state().expect("WGPU not initialized");
+        let Some(wgpu_state) = frame.wgpu_render_state() else {
+            eprintln!("[error] WGPU render state unavailable in reupload_all_traces()");
+            return;
+        };
         let device = &wgpu_state.device;
 
         let mut renderer_lock = wgpu_state.renderer.write();
-        let renderer = renderer_lock
-            .callback_resources
-            .get_mut::<PlotRenderer>()
-            .unwrap();
+        let Some(renderer) = renderer_lock.callback_resources.get_mut::<PlotRenderer>() else {
+            eprintln!("[error] PlotRenderer not found during trace reupload");
+            return;
+        };
 
         for (topic, cols) in &self.state.data.data_store.topics {
             if let Some(timestamps) = cols.get("timestamp") {
@@ -274,14 +279,17 @@ impl TiPlotApp {
     }
 
     fn process_data(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        let wgpu_state = frame.wgpu_render_state().expect("WGPU not initialized");
+        let Some(wgpu_state) = frame.wgpu_render_state() else {
+            eprintln!("[error] WGPU render state unavailable in process_data()");
+            return;
+        };
         let device = &wgpu_state.device;
 
         let mut renderer_lock = wgpu_state.renderer.write();
-        let renderer = renderer_lock
-            .callback_resources
-            .get_mut::<PlotRenderer>()
-            .unwrap();
+        let Some(renderer) = renderer_lock.callback_resources.get_mut::<PlotRenderer>() else {
+            eprintln!("[error] PlotRenderer not found in callback_resources");
+            return;
+        };
 
         let mut received_data = false;
         let mut batches_processed = 0;
@@ -289,6 +297,11 @@ impl TiPlotApp {
 
         while let Ok(msg) = self.state.data.rx.try_recv() {
             match msg {
+                DataMessage::TcpError(msg) => {
+                    eprintln!("[tcp] {}", msg);
+                    self.state.ui.tcp_error = Some(msg);
+                    received_data = true;
+                }
                 DataMessage::Metadata(meta) => {
                     if let (Some(min), Some(max)) = (meta.min_timestamp, meta.max_timestamp) {
                         let raw_min = min as f64 / 1_000_000.0;
@@ -350,6 +363,12 @@ impl TiPlotApp {
         if received_data {
             self.state.data.receiving_data = true;
             self.state.data.last_data_time = Some(std::time::Instant::now());
+            // Clear a stale TCP error once data flows again.
+            if self.state.ui.tcp_error.is_some()
+                && self.state.data.dropped_count() == 0
+            {
+                self.state.ui.tcp_error = None;
+            }
             ctx.request_repaint();
         } else {
             if let Some(last_time) = self.state.data.last_data_time {
@@ -416,6 +435,32 @@ impl TiPlotApp {
                         };
 
                         ui.label(egui::RichText::new(fps_text).color(fps_color).monospace());
+
+                        // Dropped-message counter
+                        let dropped = self.state.data.dropped_count();
+                        if dropped > 0 {
+                            ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new(format!("dropped: {}", dropped))
+                                    .color(egui::Color32::from_rgb(255, 165, 0))
+                                    .monospace(),
+                            )
+                            .on_hover_text(
+                                "Messages were dropped because the ingest channel was full. \
+                                 Data may be incomplete.",
+                            );
+                        }
+
+                        // TCP error badge
+                        if let Some(err) = &self.state.ui.tcp_error {
+                            ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new(format!("TCP: {}", err))
+                                    .color(egui::Color32::from_rgb(220, 60, 60))
+                                    .monospace(),
+                            )
+                            .on_hover_text(err.clone());
+                        }
                     });
                 });
             });

@@ -3,6 +3,10 @@ use crossbeam_channel::Sender;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc,
+};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 
@@ -10,6 +14,7 @@ use tokio::net::TcpListener;
 pub enum DataMessage {
     Metadata(TimelineRange),
     NewBatch(String, RecordBatch),
+    TcpError(String),
 }
 
 #[derive(Deserialize, Debug, Clone, Copy)]
@@ -30,11 +35,20 @@ struct PacketMetadata {
     timeline_range: TimelineRange,
 }
 
-pub fn start_tcp_server(sender: Sender<DataMessage>, ctx: egui::Context) {
+pub fn start_tcp_server(sender: Sender<DataMessage>, ctx: egui::Context, dropped: Arc<AtomicU32>) {
     tokio::spawn(async move {
-        let listener = TcpListener::bind("127.0.0.1:9999")
-            .await
-            .expect("Failed to bind TCP port 9999");
+        let listener = match TcpListener::bind("127.0.0.1:9999").await {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("[error] Failed to bind TCP port 9999: {}", e);
+                let _ = sender.try_send(DataMessage::TcpError(format!(
+                    "Failed to bind port 9999: {}",
+                    e
+                )));
+                ctx.request_repaint();
+                return;
+            }
+        };
 
         println!("TCP Receiver listening on 127.0.0.1:9999");
 
@@ -43,8 +57,13 @@ pub fn start_tcp_server(sender: Sender<DataMessage>, ctx: egui::Context) {
                 Ok((mut socket, addr)) => {
                     println!("New connection from: {}", addr);
 
-                    if let Err(e) = handle_connection(&mut socket, &sender, &ctx).await {
+                    if let Err(e) =
+                        handle_connection(&mut socket, &sender, &ctx, &dropped).await
+                    {
                         eprintln!("Error handling connection: {}", e);
+                        let _ = sender
+                            .try_send(DataMessage::TcpError(format!("Connection error: {}", e)));
+                        ctx.request_repaint();
                     }
 
                     println!("Connection closed");
@@ -61,6 +80,7 @@ async fn handle_connection(
     socket: &mut tokio::net::TcpStream,
     sender: &Sender<DataMessage>,
     ctx: &egui::Context,
+    dropped: &Arc<AtomicU32>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut len_buf = [0u8; 4];
     socket.read_exact(&mut len_buf).await?;
@@ -77,6 +97,7 @@ async fn handle_connection(
         .is_err()
     {
         eprintln!("[warn] data channel full, dropping metadata");
+        dropped.fetch_add(1, Ordering::Relaxed);
     }
 
     ctx.request_repaint();
@@ -87,7 +108,8 @@ async fn handle_connection(
 
         let mut name_buf = vec![0u8; name_len];
         socket.read_exact(&mut name_buf).await?;
-        let table_name = String::from_utf8_lossy(&name_buf).to_string();
+        let table_name = String::from_utf8(name_buf)
+            .map_err(|e| format!("Invalid UTF-8 in table name: {}", e))?;
 
         let mut size_buf = [0u8; 8];
         socket.read_exact(&mut size_buf).await?;
@@ -110,6 +132,7 @@ async fn handle_connection(
                                     "[warn] data channel full, dropping batch for '{}'",
                                     table_name
                                 );
+                                dropped.fetch_add(1, Ordering::Relaxed);
                             }
                             ctx.request_repaint();
                         }

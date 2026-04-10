@@ -197,7 +197,9 @@ impl CallbackTrait for RealPlotCallback {
         _encoder: &mut wgpu::CommandEncoder,
         resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        let renderer = resources.get::<PlotRenderer>().unwrap();
+        let Some(renderer) = resources.get::<PlotRenderer>() else {
+            return Vec::new();
+        };
         let key = format!("{}/{}", self.topic, self.col);
 
         if let Some(trace_res) = renderer.buffers.get(&key) {
@@ -241,7 +243,12 @@ impl CallbackTrait for RealPlotCallback {
                 ],
             });
 
-            renderer.paint_jobs.lock().unwrap().push_back(bind_group);
+            match renderer.paint_jobs.lock() {
+                Ok(mut jobs) => jobs.push_back(bind_group),
+                Err(e) => {
+                    eprintln!("[error] paint_jobs mutex poisoned in prepare(): {}", e);
+                }
+            }
         }
 
         Vec::new()
@@ -253,11 +260,19 @@ impl CallbackTrait for RealPlotCallback {
         render_pass: &mut wgpu::RenderPass<'static>,
         resources: &'a CallbackResources,
     ) {
-        let renderer = resources.get::<PlotRenderer>().unwrap();
+        let Some(renderer) = resources.get::<PlotRenderer>() else {
+            return;
+        };
         let key = format!("{}/{}", self.topic, self.col);
 
         if let Some(trace_res) = renderer.buffers.get(&key) {
-            let mut jobs = renderer.paint_jobs.lock().unwrap();
+            let mut jobs = match renderer.paint_jobs.lock() {
+                Ok(j) => j,
+                Err(e) => {
+                    eprintln!("[error] paint_jobs mutex poisoned in paint(): {}", e);
+                    return;
+                }
+            };
 
             if let Some(bg) = jobs.pop_front() {
                 if self.scatter_mode {
