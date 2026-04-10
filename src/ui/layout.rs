@@ -12,7 +12,7 @@ fn default_point_size() -> f32 {
 }
 
 fn default_line_thickness() -> f32 {
-    1.5
+    2.0
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

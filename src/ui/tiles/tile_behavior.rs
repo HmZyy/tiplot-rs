@@ -465,9 +465,20 @@ impl<'a> TiPlotBehavior<'a> {
             return;
         }
 
-        let start_idx = times.partition_point(|&t| t < *self.min_time).saturating_sub(1);
-        let end_idx = times.partition_point(|&t| t <= *self.max_time).min(values.len());
-        if end_idx <= start_idx + 1 {
+        let sample_count = times.len().min(values.len());
+        let start_idx = times
+            .partition_point(|&t| t < *self.min_time)
+            .saturating_sub(1)
+            .min(sample_count);
+        let end_idx = times.partition_point(|&t| t <= *self.max_time).min(sample_count);
+        // Include the first sample beyond the viewport so the last visible segment
+        // still reaches the clip edge when the next point is off-screen.
+        let render_end_idx = if end_idx < sample_count {
+            end_idx + 1
+        } else {
+            end_idx
+        };
+        if render_end_idx <= start_idx + 1 {
             return;
         }
 
@@ -477,10 +488,11 @@ impl<'a> TiPlotBehavior<'a> {
             return;
         }
 
-        let mut points = Vec::with_capacity((end_idx - start_idx).min(rect.width() as usize * 2));
+        let mut points =
+            Vec::with_capacity((render_end_idx - start_idx).min(rect.width() as usize * 2));
         let mut last_x_bucket: Option<i32> = None;
 
-        for i in start_idx..end_idx {
+        for i in start_idx..render_end_idx {
             let x_norm = (times[i] - *self.min_time) / time_span;
             let y_norm = (values[i] - min_y) / value_span;
             let point = egui::pos2(
