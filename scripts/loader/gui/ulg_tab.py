@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QThread
 
+from gui.progress_button import ProgressButton
 from senders.ulg import ULGSender
 
 
@@ -39,24 +40,14 @@ class ULGTab(QWidget):
         file_group.setLayout(file_layout)
         layout.addWidget(file_group)
         
-        self.send_btn = QPushButton("Send ULG File")
+        self.send_btn = ProgressButton(
+            "Send ULG File",
+            base_color="#3b82f6",
+            hover_color="#2563eb",
+        )
         self.send_btn.setEnabled(False)
         self.send_btn.clicked.connect(self.send_file)
-        self.send_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3b82f6;
-                color: white;
-                padding: 10px;
-                border-radius: 5px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2563eb;
-            }
-            QPushButton:disabled {
-                background-color: #64748b;
-            }
-        """)
+        self._set_button_progress(None)
         layout.addWidget(self.send_btn)
         
         self.output_text = QTextEdit()
@@ -120,7 +111,9 @@ class ULGTab(QWidget):
         
         self.sender = ULGSender(self.ulg_file, host, port)
         self.sender.log_signal.connect(self.log_output)
+        self.sender.progress_signal.connect(self.on_progress)
         self.sender.finished_signal.connect(self.on_finished)
+        self._set_button_progress(0)
         
         self.sender_thread = QThread()
         self.sender.moveToThread(self.sender_thread)
@@ -131,9 +124,16 @@ class ULGTab(QWidget):
         self.sender_thread.quit()
         self.sender_thread.wait()
         self.send_btn.setEnabled(True)
-    
+        self._set_button_progress(None)
+
+    def on_progress(self, percent):
+        self._set_button_progress(percent)
+
     def log_output(self, text):
         self.output_text.append(text)
         self.output_text.verticalScrollBar().setValue(
             self.output_text.verticalScrollBar().maximum()
         )
+
+    def _set_button_progress(self, percent):
+        self.send_btn.set_progress(percent)

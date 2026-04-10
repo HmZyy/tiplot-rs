@@ -1,8 +1,9 @@
 import mmap
 import struct
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, BinaryIO, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from collections import defaultdict
 
 
@@ -88,8 +89,14 @@ class ArduPilotBinParser:
         self.gps_start_time: Optional[datetime] = None
         self.ms_offset: Optional[float] = None
         self.firmware_type: Optional[str] = None
+        self._last_progress_percent = -1
+        self._last_progress_emit = 0.0
 
-    def parse(self) -> None:
+    def parse(self, progress_callback: Optional[Callable[[int], None]] = None) -> None:
+        self._last_progress_percent = -1
+        self._last_progress_emit = 0.0
+        self._emit_progress(progress_callback, 0)
+
         with open(self.filepath, "rb") as handle:
             with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                 if not self._looks_like_binary_log(mm):
@@ -138,10 +145,28 @@ class ArduPilotBinParser:
 
                     self._process_message(fmt_def.name, message)
                     cursor = payload_end
+                    self._emit_progress(
+                        progress_callback,
+                        min(80, int((cursor / data_length) * 80)) if data_length else 80,
+                    )
 
         self._build_unit_multi_list()
         self._discover_instances()
         self._detect_gps_time_anchor()
+        self._emit_progress(progress_callback, 80)
+
+    def _emit_progress(self, progress_callback: Optional[Callable[[int], None]], percent: int) -> None:
+        if progress_callback is None:
+            return
+
+        clamped = max(0, min(100, percent))
+        now = time.monotonic()
+        if clamped == self._last_progress_percent and now - self._last_progress_emit < 0.1:
+            return
+
+        self._last_progress_percent = clamped
+        self._last_progress_emit = now
+        progress_callback(clamped)
 
     def _looks_like_binary_log(self, data: Any) -> bool:
         return len(data) >= 2 and data[0] == self.HEAD1 and data[1] == self.HEAD2

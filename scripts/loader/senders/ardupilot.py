@@ -1,6 +1,7 @@
 import json
 import socket
 import struct
+import time
 from typing import List, Dict, Any
 from collections import defaultdict
 
@@ -13,6 +14,7 @@ from parsers.ardupilot import ArduPilotBinParser
 
 class ArduPilotSender(QObject):
     log_signal = pyqtSignal(str)
+    progress_signal = pyqtSignal(int)
     finished_signal = pyqtSignal(bool, str)
     
     def __init__(self, filename, host, port):
@@ -20,6 +22,8 @@ class ArduPilotSender(QObject):
         self.filename = filename
         self.host = host
         self.port = port
+        self._last_progress = -1
+        self._last_progress_emit = 0.0
     
     def messages_to_arrow_table(self, msg_type: str, messages: List[Dict[str, Any]]):
         if not messages:
@@ -63,17 +67,21 @@ class ArduPilotSender(QObject):
     def run(self):
         try:
             self.log_signal.emit(f"Parsing ArduPilot .BIN file: {self.filename}")
+            self._emit_progress(0)
             
             parser = ArduPilotBinParser(self.filename)
-            parser.parse()
+            parser.parse(progress_callback=self._emit_progress)
             
             tables = {}
-            for msg_type in parser.get_available_message_types():
+            message_types = parser.get_available_message_types()
+            total_message_types = max(1, len(message_types))
+            for index, msg_type in enumerate(message_types, start=1):
                 messages = parser.get_messages_by_type(msg_type)
                 if messages:
                     table = self.messages_to_arrow_table(msg_type, messages)
                     if table is not None:
                         tables[msg_type.lower()] = table
+                self._emit_progress(80 + int((index / total_message_types) * 20))
             
             self.log_signal.emit(f"\nData Topics: {len(tables)}")
             for name, table in tables.items():
@@ -127,6 +135,7 @@ class ArduPilotSender(QObject):
                     sock.sendall(arrow_buffer)
                 
                 self.log_signal.emit("\n✓ All data sent successfully!")
+                self._emit_progress(100)
                 self.finished_signal.emit(True, "Success")
                 
             finally:
@@ -142,3 +151,13 @@ class ArduPilotSender(QObject):
             import traceback
             traceback.print_exc()
             self.finished_signal.emit(False, msg)
+
+    def _emit_progress(self, percent: int) -> None:
+        clamped = max(0, min(100, percent))
+        now = time.monotonic()
+        if clamped == self._last_progress and now - self._last_progress_emit < 0.1:
+            return
+
+        self._last_progress = clamped
+        self._last_progress_emit = now
+        self.progress_signal.emit(clamped)
