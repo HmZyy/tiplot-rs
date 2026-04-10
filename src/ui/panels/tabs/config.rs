@@ -163,8 +163,12 @@ impl VehicleConfig {
                     return 0.0;
                 }
                 let idx = timestamps.partition_point(|&time| time <= t);
-                let safe_idx = idx.saturating_sub(1);
-                return values[safe_idx];
+                // idx == 0 means t is before all recorded data; return no value rather
+                // than silently clamping to values[0] (which belongs to a later time).
+                if idx == 0 {
+                    return 0.0;
+                }
+                return values[(idx - 1).min(values.len() - 1)];
             }
         }
         0.0

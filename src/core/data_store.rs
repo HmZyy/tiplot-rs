@@ -6,7 +6,6 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use std::collections::HashMap;
 use std::fs::File;
-use std::hash::{Hash, Hasher};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
 use std::sync::Arc;
@@ -29,7 +28,7 @@ impl DataStore {
     pub fn ingest(&mut self, topic: String, batch: RecordBatch) {
         let schema = batch.schema();
 
-        let time_offset = self.start_time;
+        let time_offset = self.start_time as f64;
 
         let entry = self.topics.entry(topic).or_default();
         for (i, field) in schema.fields().iter().enumerate() {
@@ -43,7 +42,7 @@ impl DataStore {
     fn convert_and_append_static(
         column: &dyn Array,
         col_name: &str,
-        time_offset: f32,
+        time_offset: f64,
         entry: &mut HashMap<String, Vec<f32>>,
     ) {
         let target = entry.entry(col_name.to_string()).or_default();
@@ -60,11 +59,9 @@ impl DataStore {
             target.extend(arr.values().iter().map(|&v| v as f32));
         } else if let Some(arr) = column.as_any().downcast_ref::<Int64Array>() {
             if col_name == "timestamp" {
-                let time_offset_f64 = time_offset as f64;
                 target.extend(arr.values().iter().map(|&v| {
                     let seconds = v as f64 / 1_000_000.0;
-                    let normalized = seconds - time_offset_f64;
-                    normalized as f32
+                    (seconds - time_offset) as f32
                 }));
             } else {
                 target.extend(arr.values().iter().map(|&v| v as f32));
@@ -78,8 +75,8 @@ impl DataStore {
         } else if let Some(arr) = column.as_any().downcast_ref::<UInt64Array>() {
             if col_name == "timestamp" {
                 target.extend(arr.values().iter().map(|&v| {
-                    let seconds = (v as f64 / 1_000_000.0) as f32;
-                    seconds - time_offset
+                    let seconds = v as f64 / 1_000_000.0;
+                    (seconds - time_offset) as f32
                 }));
             } else {
                 target.extend(arr.values().iter().map(|&v| v as f32));
@@ -89,9 +86,13 @@ impl DataStore {
         } else if let Some(arr) = column.as_any().downcast_ref::<StringArray>() {
             target.extend(arr.iter().map(|v| {
                 v.map(|s| {
-                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                    s.hash(&mut hasher);
-                    (hasher.finish() as f32) % 1000.0
+                    // FNV-1a: deterministic, no per-process random seed.
+                    let mut hash: u64 = 14695981039346656037;
+                    for byte in s.bytes() {
+                        hash ^= byte as u64;
+                        hash = hash.wrapping_mul(1099511628211);
+                    }
+                    (hash % 1000) as f32
                 })
                 .unwrap_or(f32::NAN)
             }));
