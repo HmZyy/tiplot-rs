@@ -1,7 +1,7 @@
 pub mod plot_tile;
 pub mod tile_behavior;
 
-pub use plot_tile::{InterpolationMode, PlotTile};
+pub use plot_tile::{ConversionMode, InterpolationMode, PlotTile};
 pub use tile_behavior::TiPlotBehavior;
 
 use eframe::egui;

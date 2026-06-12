@@ -1,4 +1,28 @@
 use crate::core::DataStore;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ConversionMode {
+    Off,
+    DegreesToRadians,
+    RadiansToDegrees,
+}
+
+impl Default for ConversionMode {
+    fn default() -> Self {
+        Self::Off
+    }
+}
+
+impl ConversionMode {
+    pub fn factor(&self) -> f32 {
+        match self {
+            Self::Off => 1.0,
+            Self::DegreesToRadians => std::f32::consts::PI / 180.0,
+            Self::RadiansToDegrees => 180.0 / std::f32::consts::PI,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Copy, PartialEq)]
 pub enum InterpolationMode {
@@ -38,6 +62,8 @@ pub struct PlotTile {
     pub cached_for_playback: bool,
 
     pub interpolation_mode: InterpolationMode,
+
+    pub conversion: ConversionMode,
 }
 
 impl PlotTile {
@@ -53,6 +79,7 @@ impl PlotTile {
             show_info_window: false,
             cached_for_playback: false,
             interpolation_mode: InterpolationMode::default(),
+            conversion: ConversionMode::default(),
         }
     }
 
@@ -86,6 +113,8 @@ impl PlotTile {
         self.cached_for_playback = for_playback;
         self.cached_tooltip_values.clear();
 
+        let factor = self.conversion.factor();
+
         for trace in &self.traces {
             let value = if let (Some(times), Some(values)) = (
                 data_store.get_column(&trace.topic, "timestamp"),
@@ -100,7 +129,7 @@ impl PlotTile {
                 None
             };
 
-            self.cached_tooltip_values.push(value);
+            self.cached_tooltip_values.push(value.map(|v| v * factor));
         }
     }
 

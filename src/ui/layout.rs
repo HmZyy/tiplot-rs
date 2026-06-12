@@ -1,5 +1,5 @@
 use crate::ui::panels::tabs::config::VehicleConfig;
-use crate::ui::tiles::PlotTile;
+use crate::ui::tiles::{ConversionMode, PlotTile};
 use anyhow::{Context, Result};
 use egui_tiles::{Container, Tile, Tiles, Tree};
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,8 @@ pub struct SerializablePlotTile {
     pub show_legend: bool,
     pub show_hover_tooltip: bool,
     pub scatter_mode: bool,
+    #[serde(default)]
+    pub conversion: ConversionMode,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -141,6 +143,7 @@ impl LayoutData {
                         show_legend: plot_tile.show_legend,
                         show_hover_tooltip: plot_tile.show_hover_tooltip,
                         scatter_mode: plot_tile.scatter_mode,
+                        conversion: plot_tile.conversion,
                     })
                 }
                 Tile::Container(container) => {
@@ -202,6 +205,7 @@ impl LayoutData {
                 tile.show_legend = plot_tile.show_legend;
                 tile.show_hover_tooltip = plot_tile.show_hover_tooltip;
                 tile.scatter_mode = plot_tile.scatter_mode;
+                tile.conversion = plot_tile.conversion;
 
                 for trace in &plot_tile.traces {
                     tile.add_trace(trace.topic.clone(), trace.col.clone(), trace.color);

@@ -184,6 +184,7 @@ pub struct RealPlotCallback {
     pub bounds: [f32; 4], // [min_time, max_time, min_val, max_val]
     pub color: [f32; 4],  // RGBA
     pub scatter_mode: bool,
+    pub value_scale: f32,
 }
 
 impl CallbackTrait for RealPlotCallback {
@@ -205,7 +206,7 @@ impl CallbackTrait for RealPlotCallback {
                 .iter()
                 .chain(self.color.iter())
                 .cloned()
-                .chain([point_size, 0.0, 0.0, 0.0].iter().cloned()) // params vec4
+                .chain([point_size, self.value_scale, 0.0, 0.0].iter().cloned()) // params vec4
                 .collect();
 
             let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

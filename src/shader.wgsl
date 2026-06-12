@@ -2,7 +2,7 @@ struct Uniforms {
     // [min_time, max_time, min_val, max_val]
     bounds: vec4<f32>, 
     color: vec4<f32>,
-    params: vec4<f32>,  // [point_size, unused, unused, unused]
+    params: vec4<f32>,  // [point_size, value_scale, unused, unused]
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -16,7 +16,7 @@ struct VertexOutput {
 fn vs_main(@builtin(vertex_index) idx: u32) -> VertexOutput {
     // Data is interleaved: [Time0, Val0, Time1, Val1, ...]
     let t = data[idx * 2u];
-    let v = data[idx * 2u + 1u];
+    let v = data[idx * 2u + 1u] * uniforms.params.y;
 
     let min_t = uniforms.bounds.x;
     let max_t = uniforms.bounds.y;

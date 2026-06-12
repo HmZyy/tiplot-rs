@@ -1,4 +1,4 @@
-use super::PlotTile;
+use super::{ConversionMode, PlotTile};
 use crate::core::DataStore;
 use crate::ui::panels::TopicPanelSelection;
 use crate::ui::renderer::RealPlotCallback;
@@ -147,6 +147,33 @@ impl<'a> Behavior<PlotTile> for TiPlotBehavior<'a> {
             {
                 ui.close_menu();
             }
+
+            ui.menu_button(format!("{} Conversions", icons::ARROWS_LEFT_RIGHT), |ui| {
+                let mut changed = false;
+                changed |= ui
+                    .radio_value(&mut tile.conversion, ConversionMode::Off, "Off")
+                    .clicked();
+                changed |= ui
+                    .radio_value(
+                        &mut tile.conversion,
+                        ConversionMode::DegreesToRadians,
+                        "Degrees to Radians",
+                    )
+                    .clicked();
+                changed |= ui
+                    .radio_value(
+                        &mut tile.conversion,
+                        ConversionMode::RadiansToDegrees,
+                        "Radians to Degrees",
+                    )
+                    .clicked();
+
+                if changed {
+                    tile.cached_tooltip_values.clear();
+                    tile.cached_tooltip_time = f32::NEG_INFINITY;
+                    ui.close_menu();
+                }
+            });
 
             ui.separator();
 
@@ -312,6 +339,7 @@ impl<'a> Behavior<PlotTile> for TiPlotBehavior<'a> {
                     bounds: [*self.min_time, *self.max_time, min_y, max_y],
                     color: trace.color,
                     scatter_mode: tile.scatter_mode,
+                    value_scale: tile.conversion.factor(),
                 },
             );
             ui.painter().add(cb);
@@ -457,6 +485,8 @@ impl<'a> TiPlotBehavior<'a> {
         let mut max_y = f32::MIN;
         let mut has_data = false;
 
+        let factor = tile.conversion.factor();
+
         for trace in &tile.traces {
             if let (Some(times), Some(vals)) = (
                 self.data_store.get_column(&trace.topic, "timestamp"),
@@ -470,7 +500,7 @@ impl<'a> TiPlotBehavior<'a> {
                 let end_idx = times.partition_point(|&t| t <= *self.max_time);
 
                 for i in start_idx..end_idx.min(vals.len()) {
-                    let v = vals[i];
+                    let v = vals[i] * factor;
                     if v < min_y {
                         min_y = v;
                     }
