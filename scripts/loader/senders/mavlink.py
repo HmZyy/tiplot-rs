@@ -1,4 +1,5 @@
 import json
+import math
 import socket
 import struct
 import time
@@ -37,6 +38,8 @@ class MAVLinkStreamer(QObject):
         #     'channels': 18,
         # },
     }
+
+    RAD_TO_DEG_FIELDS = {'roll', 'pitch', 'yaw'}
     
     def __init__(self, connection_string, baudrate, host, port, update_rate_hz):
         super().__init__()
@@ -146,13 +149,23 @@ class MAVLinkStreamer(QObject):
             return 0
         return value
     
-    def create_table_from_messages(self, topic_name, messages):
+    def radians_to_degrees(self, value):
+        if value is None:
+            return None
+
+        try:
+            return math.degrees(value)
+        except (TypeError, ValueError):
+            return value
+
+    def create_table_from_messages(self, topic_name, messages, field_transforms=None):
         if not messages:
             return None
         
         first_msg = messages[0]['msg']
         msg_type = first_msg.get_type()
         fieldnames = first_msg.get_fieldnames()
+        field_transforms = field_transforms or {}
         
         array_config = self.get_array_fields_for_message(msg_type)
         
@@ -167,6 +180,9 @@ class MAVLinkStreamer(QObject):
             for field in fieldnames:
                 try:
                     value = getattr(msg, field)
+                    transform = field_transforms.get(field)
+                    if transform is not None:
+                        value = transform(value)
                     
                     # Handle array expansion for configured fields
                     if field in array_config and isinstance(value, (list, tuple)):
@@ -245,6 +261,13 @@ class MAVLinkStreamer(QObject):
             return pa.Table.from_arrays(arrays, names=names)
         except Exception:
             return None
+
+    def create_ahrs2_degrees_table(self, messages):
+        transforms = {
+            field: self.radians_to_degrees
+            for field in self.RAD_TO_DEG_FIELDS
+        }
+        return self.create_table_from_messages('AHRS2_DEG', messages, transforms)
     
     def generate_tables_from_buffers(self, start_time_us, end_time_us):
         tables = {}
@@ -267,6 +290,11 @@ class MAVLinkStreamer(QObject):
                     if table is not None:
                         table_name = topic_name.lower()
                         tables[table_name] = table
+
+                    if topic_name == 'AHRS2':
+                        degrees_table = self.create_ahrs2_degrees_table(messages)
+                        if degrees_table is not None:
+                            tables['AHRS2_DEG'] = degrees_table
                 except Exception:
                     pass
         
